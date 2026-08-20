@@ -20,7 +20,7 @@ Gedacht fuer den unbeaufsichtigten Betrieb auf einem **Windows Server** in der
 | | |
 |---|---|
 | Windows | Server 2016 oder neuer |
-| Python | 3.11 oder neuer, von <https://www.python.org/downloads/windows/> ("Install for all users") |
+| Python | 3.11 oder neuer, **maschinenweit** installiert ("Install for all users", z. B. `C:\Program Files\Python313`) - siehe Warnung in 2.2 |
 | Ablage | ein frei waehlbarer Basisordner, z. B. `C:\FIRMA\cmkoffline2mail` |
 | Checkmk | 2.3.x, erreichbar per HTTPS, Automationsbenutzer vorhanden |
 | SMTP | Relay/Smarthost erreichbar (mit oder ohne Anmeldung) |
@@ -77,11 +77,36 @@ Das Programm braucht keine Fremdpakete, eine venv ist trotzdem sinnvoll: sie
 bindet die Ausfuehrung an eine bestimmte Python-Version und macht sie unabhaengig
 von spaeteren Aenderungen am System-Python.
 
+> **Das Basis-Python muss maschinenweit installiert sein.** Eine venv ist kein
+> vollstaendiges Python - ihre `pyvenv.cfg` verweist dauerhaft auf den Interpreter,
+> mit dem sie erzeugt wurde:
+>
+> ```
+> home       = C:\Users\Admin\AppData\Local\Python\pythoncore-3.14-64   <- unbrauchbar
+> home       = C:\Program Files\Python313                                <- richtig
+> ```
+>
+> Ein Python aus dem eigenen Benutzerprofil (Microsoft Store, `winget`, Python
+> Install Manager oder Installer ohne "for all users") funktioniert interaktiv
+> tadellos, aber das gMSA kommt an das fremde Profil nicht heran - die Aufgabe
+> endet dann sofort mit einem Zugriffsfehler.
+>
+> `Install-ScheduledTask.ps1` sucht deshalb nur maschinenweite Installationen
+> (HKLM-Registrierung, `C:\Program Files\Python3*`, `C:\Python3*`), prueft auch
+> eine bereits vorhandene `.venv` und bricht mit Klartextmeldung ab, wenn das
+> Basis-Python im Benutzerprofil liegt.
+
 ```powershell
 cd "C:\FIRMA\cmkoffline2mail"
-& "C:\Program Files\Python311\python.exe" -m venv .venv
+& "C:\Program Files\Python313\python.exe" -m venv .venv
 .\.venv\Scripts\python.exe -m cmkoffline2mail --version
+
+# Kontrolle - hier darf kein Pfad unter C:\Users stehen:
+Get-Content .venv\pyvenv.cfg | Select-String "home|executable"
 ```
+
+Ist bereits eine venv aus einem Benutzerprofil-Python vorhanden, hilft nur neu
+anlegen: `.venv` loeschen, Python maschinenweit installieren, Schritt wiederholen.
 
 `Install-ScheduledTask.ps1` (Schritt 2.7) legt die venv bei Bedarf selbst an.
 
@@ -410,6 +435,7 @@ Es gibt bewusst **keine Entwarnungsmail**: gemeldet wird nur das Ausbleiben von 
 | Aufgabe endet mit `0x8007010B` | Arbeitsverzeichnis der Aufgabe ist ungueltig |
 | Aufgabe endet mit `2` | `--validate` von Hand ausfuehren, die Meldung nennt den Schluessel |
 | Aufgabe endet mit `9` | Wrapper findet `.venv\Scripts\python.exe` nicht |
+| Aufgabe endet mit `0xC0000135` / Zugriff verweigert | venv wurde aus einem Python im Benutzerprofil erzeugt - `pyvenv.cfg` pruefen (siehe 2.2) |
 | `No module named cmkoffline2mail` | Arbeitsverzeichnis ist nicht der Basisordner |
 | Es kommen keine Mails mehr | Host wurde bereits gemeldet - `repeat_after` pruefen oder Statusdatei loeschen |
 | Keine Protokolldatei | `logging.file` liegt in einem Pfad ohne Schreibrecht fuer das gMSA |

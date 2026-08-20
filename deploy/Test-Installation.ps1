@@ -25,6 +25,13 @@ param(
 
 $script:Problems = @()
 
+function Test-UserProfilePath {
+    param([string] $Path)
+    if (-not $Path) { return $false }
+    try { $full = [System.IO.Path]::GetFullPath($Path) } catch { $full = $Path }
+    return $full.StartsWith((Join-Path $env:SystemDrive "Users"), [System.StringComparison]::OrdinalIgnoreCase)
+}
+
 function Test-Item {
     param([string] $Name, [scriptblock] $Check, [string] $Hint = "")
     try {
@@ -89,6 +96,20 @@ if (Test-Path $venvPython) {
             "$v"
         } finally { Pop-Location }
     } "Liegt das Paket wirklich unter dem Basisordner?"
+
+    # Eine venv verweist dauerhaft auf ihr Basis-Python. Liegt das in einem
+    # Benutzerprofil, kann ein Dienstkonto (gMSA) es nicht lesen.
+    $pyvenvCfg = Join-Path $InstallDir ".venv\pyvenv.cfg"
+    if (Test-Path -LiteralPath $pyvenvCfg) {
+        $basePaths = Get-Content $pyvenvCfg |
+                     Where-Object { $_ -match "^\s*(home|executable)\s*=" } |
+                     ForEach-Object { ($_ -split "=", 2)[1].Trim() }
+        Write-Host "         Basis-Python: $($basePaths | Select-Object -First 1)"
+        Test-Item "Basis-Python liegt NICHT in einem Benutzerprofil" `
+                  { -not ($basePaths | Where-Object { Test-UserProfilePath $_ }) } `
+                  ("Python maschinenweit installieren ('Install for all users'), " +
+                   "'.venv' loeschen und Install-ScheduledTask.ps1 erneut ausfuehren")
+    }
 }
 
 # --- 3. Konfiguration -------------------------------------------------------

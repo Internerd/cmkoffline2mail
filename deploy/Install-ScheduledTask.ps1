@@ -42,7 +42,8 @@ param(
 
     [string] $InstallDir       = (Split-Path -Parent $PSScriptRoot),
     [string] $TaskName         = "cmkoffline2mail",
-    [string] $PythonExe        = "",                         # leer = automatisch suchen
+    [string] $PythonExe        = "",                         # leer = maschinenweites Python suchen
+                                                             # (muss "Install for all users" sein!)
     [int]    $IntervalMinutes  = 15,
     [int]    $TimeLimitMinutes = 30,
     [switch] $SkipVenv,                                      # vorhandene venv unveraendert lassen
@@ -52,6 +53,59 @@ param(
 $ErrorActionPreference = "Stop"
 
 function Write-Step { param([string] $Text) Write-Host "==> $Text" -ForegroundColor Cyan }
+
+function Test-UserProfilePath {
+    <#  Liegt der Pfad in einem Benutzerprofil (C:\Users\...)?
+        Solche Installationen sind fuer ein gMSA unbrauchbar: das Dienstkonto
+        hat keinen Zugriff auf fremde Profile.  #>
+    param([string] $Path)
+    if (-not $Path) { return $false }
+    try { $full = [System.IO.Path]::GetFullPath($Path) } catch { $full = $Path }
+    $usersDir = Join-Path $env:SystemDrive "Users"
+    return $full.StartsWith($usersDir, [System.StringComparison]::OrdinalIgnoreCase)
+}
+
+function Get-PythonVersion {
+    param([string] $Exe)
+    $out = & $Exe -c "import sys; print('%d.%d' % sys.version_info[:2])" 2>&1
+    if ($LASTEXITCODE -ne 0) { return $null }
+    return "$out".Trim()
+}
+
+function Find-MachineWidePython {
+    <#  Sucht maschinenweit installierte Interpreter (HKLM-Registrierung und
+        die ueblichen Programmverzeichnisse) und liefert den neuesten ab 3.11.  #>
+    $candidates = New-Object System.Collections.Generic.List[string]
+
+    foreach ($hive in @("HKLM:\SOFTWARE\Python\PythonCore", "HKLM:\SOFTWARE\WOW6432Node\Python\PythonCore")) {
+        if (-not (Test-Path $hive)) { continue }
+        foreach ($key in (Get-ChildItem $hive -ErrorAction SilentlyContinue)) {
+            $installPath = (Get-ItemProperty -Path (Join-Path $key.PSPath "InstallPath") `
+                            -ErrorAction SilentlyContinue).'(default)'
+            if ($installPath) { $candidates.Add((Join-Path $installPath "python.exe")) }
+        }
+    }
+
+    foreach ($pattern in @("$env:ProgramFiles\Python3*\python.exe",
+                           "${env:ProgramFiles(x86)}\Python3*\python.exe",
+                           "$env:SystemDrive\Python3*\python.exe")) {
+        Get-ChildItem -Path $pattern -ErrorAction SilentlyContinue |
+            ForEach-Object { $candidates.Add($_.FullName) }
+    }
+
+    $best = $null
+    foreach ($exe in ($candidates | Select-Object -Unique)) {
+        if (-not (Test-Path -LiteralPath $exe)) { continue }
+        if (Test-UserProfilePath $exe) { continue }
+        $version = Get-PythonVersion $exe
+        if (-not $version) { continue }
+        if ([version]$version -lt [version]"3.11") { continue }
+        if (-not $best -or [version]$version -gt [version]$best.Version) {
+            $best = [pscustomobject]@{ Exe = $exe; Version = $version }
+        }
+    }
+    return $best
+}
 
 # Installation vollstaendig mitschneiden - hilft, wenn spaeter etwas nicht laeuft.
 $transcript = $null
@@ -83,41 +137,73 @@ $logDir      = Join-Path $InstallDir "logs"
 $configPath  = Join-Path $configDir "config.toml"
 
 # --- 2. Virtuelle Umgebung --------------------------------------------------
+# WICHTIG: Das Basis-Python MUSS maschinenweit installiert sein. Eine venv
+# verweist in ihrer pyvenv.cfg dauerhaft auf das Basis-Python; liegt dieses in
+# einem Benutzerprofil (z. B. C:\Users\<Name>\AppData\Local\Python\...), kann
+# das gMSA es nicht lesen und die Aufgabe scheitert sofort.
+
 if ($SkipVenv -and (Test-Path -LiteralPath $venvPython)) {
     Write-Step "Vorhandene virtuelle Umgebung wird verwendet: $venvDir"
-} else {
-    if (-not (Test-Path -LiteralPath $venvPython)) {
-        if (-not $PythonExe) {
-            $candidate = Get-Command python.exe -ErrorAction SilentlyContinue |
-                         Where-Object { $_.Source -notlike "*WindowsApps*" } |
-                         Select-Object -First 1
-            if ($candidate) {
-                $PythonExe = $candidate.Source
-            } elseif (Get-Command py.exe -ErrorAction SilentlyContinue) {
-                $PythonExe = (& py.exe -3 -c "import sys; print(sys.executable)")
-            } else {
-                throw "Kein Python gefunden. Bitte Python 3.11+ installieren und -PythonExe angeben."
-            }
-        }
+} elseif (-not (Test-Path -LiteralPath $venvPython)) {
+    if ($PythonExe) {
         if (-not (Test-Path -LiteralPath $PythonExe)) {
             throw "Python wurde unter '$PythonExe' nicht gefunden."
         }
-
-        $version = & $PythonExe -c "import sys; print('%d.%d' % sys.version_info[:2])"
-        if ([version]$version -lt [version]"3.11") {
-            throw "Python $version ist zu alt - benoetigt wird 3.11 oder neuer (gefunden: $PythonExe)."
-        }
-
-        Write-Step "Lege virtuelle Umgebung an ($PythonExe, Python $version)"
-        & $PythonExe -m venv $venvDir
-        if ($LASTEXITCODE -ne 0) { throw "Anlegen der virtuellen Umgebung ist fehlgeschlagen." }
+        $version = Get-PythonVersion $PythonExe
+        if (-not $version) { throw "'$PythonExe' liess sich nicht ausfuehren." }
     } else {
-        Write-Step "Virtuelle Umgebung ist bereits vorhanden: $venvDir"
+        Write-Step "Suche maschinenweit installiertes Python (3.11+)"
+        $found = Find-MachineWidePython
+        if (-not $found) {
+            throw ("Es wurde kein maschinenweit installiertes Python 3.11+ gefunden.`n" +
+                   "Ein Python aus dem Benutzerprofil (C:\Users\...\AppData\...) ist hier " +
+                   "unbrauchbar, weil das gMSA nicht darauf zugreifen kann.`n" +
+                   "Bitte Python von python.org mit der Option 'Install for all users' " +
+                   "installieren (Ziel z. B. C:\Program Files\Python313) und den Aufruf " +
+                   "wiederholen - notfalls mit -PythonExe `"C:\Program Files\Python313\python.exe`".")
+        }
+        $PythonExe = $found.Exe
+        $version   = $found.Version
     }
+
+    if ([version]$version -lt [version]"3.11") {
+        throw "Python $version ist zu alt - benoetigt wird 3.11 oder neuer (gefunden: $PythonExe)."
+    }
+
+    if (Test-UserProfilePath $PythonExe) {
+        throw ("'$PythonExe' liegt in einem Benutzerprofil.`n" +
+               "Eine daraus erzeugte virtuelle Umgebung verweist dauerhaft auf diesen Pfad " +
+               "und ist unter dem Dienstkonto $GmsaAccount nicht lauffaehig.`n" +
+               "Bitte Python maschinenweit installieren ('Install for all users').")
+    }
+
+    Write-Step "Lege virtuelle Umgebung an ($PythonExe, Python $version)"
+    & $PythonExe -m venv $venvDir
+    if ($LASTEXITCODE -ne 0) { throw "Anlegen der virtuellen Umgebung ist fehlgeschlagen." }
+} else {
+    Write-Step "Virtuelle Umgebung ist bereits vorhanden: $venvDir"
 }
 
 if (-not (Test-Path -LiteralPath $venvPython)) {
     throw "In der virtuellen Umgebung fehlt '$venvPython'."
+}
+
+# Auch eine bereits vorhandene venv pruefen: worauf verweist ihre pyvenv.cfg?
+$pyvenvCfg = Join-Path $venvDir "pyvenv.cfg"
+if (Test-Path -LiteralPath $pyvenvCfg) {
+    $basePaths = Get-Content $pyvenvCfg |
+                 Where-Object { $_ -match "^\s*(home|executable)\s*=" } |
+                 ForEach-Object { ($_ -split "=", 2)[1].Trim() }
+    $homePath = $basePaths | Select-Object -First 1
+    Write-Host "    Basis-Python der venv: $homePath"
+    $inProfile = $basePaths | Where-Object { Test-UserProfilePath $_ } | Select-Object -First 1
+    if ($inProfile) {
+        throw ("Die virtuelle Umgebung '$venvDir' verweist auf ein Python im Benutzerprofil:`n" +
+               "    $inProfile`n" +
+               "Unter dem Dienstkonto $GmsaAccount ist sie damit nicht lauffaehig.`n" +
+               "Bitte den Ordner '.venv' loeschen, Python maschinenweit installieren " +
+               "('Install for all users') und dieses Skript erneut ausfuehren.")
+    }
 }
 
 # Funktionstest: laeuft das Programm mit dieser venv?
