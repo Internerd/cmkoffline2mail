@@ -108,6 +108,20 @@ Get-Content .venv\pyvenv.cfg | Select-String "home|executable"
 Ist bereits eine venv aus einem Benutzerprofil-Python vorhanden, hilft nur neu
 anlegen: `.venv` loeschen, Python maschinenweit installieren, Schritt wiederholen.
 
+**Paket in der venv bekanntmachen.** `python -m cmkoffline2mail` findet das Paket
+sonst nur, wenn das Arbeitsverzeichnis zufaellig der Basisordner ist - sonst kommt
+`No module named cmkoffline2mail`. Ein Eintrag im Suchpfad der venv loest das
+dauerhaft (kein pip, kein Internetzugang noetig):
+
+```powershell
+.\deploy\Register-PackagePath.ps1
+```
+
+Das Skript schreibt `<Basisordner>` in
+`.venv\Lib\site-packages\cmkoffline2mail.pth` und prueft anschliessend den
+Import aus einem fremden Verzeichnis. `Install-ScheduledTask.ps1` erledigt das
+ebenfalls automatisch.
+
 `Install-ScheduledTask.ps1` (Schritt 2.7) legt die venv bei Bedarf selbst an.
 
 > **Wichtig fuer die Aufgabenplanung:** Ein `activate` gibt es dort nicht und wird
@@ -436,7 +450,7 @@ Es gibt bewusst **keine Entwarnungsmail**: gemeldet wird nur das Ausbleiben von 
 | Aufgabe endet mit `2` | `--validate` von Hand ausfuehren, die Meldung nennt den Schluessel |
 | Aufgabe endet mit `9` | Wrapper findet `.venv\Scripts\python.exe` nicht |
 | Aufgabe endet mit `0xC0000135` / Zugriff verweigert | venv wurde aus einem Python im Benutzerprofil erzeugt - `pyvenv.cfg` pruefen (siehe 2.2) |
-| `No module named cmkoffline2mail` | Arbeitsverzeichnis ist nicht der Basisordner |
+| `No module named cmkoffline2mail` | Suchpfad-Eintrag fehlt - `.\deploy\Register-PackagePath.ps1` ausfuehren. Kommt die Meldung danach weiter, liegt das Paket nicht unter dem Basisordner (ZIP-Doppelordner, siehe 2.1) |
 | Es kommen keine Mails mehr | Host wurde bereits gemeldet - `repeat_after` pruefen oder Statusdatei loeschen |
 | Keine Protokolldatei | `logging.file` liegt in einem Pfad ohne Schreibrecht fuer das gMSA |
 
@@ -494,6 +508,7 @@ cmkoffline2mail/     Python-Paket
 deploy/
 ├─ Install-ScheduledTask.ps1   venv, Verzeichnisse, Rechte, Aufgabe
 ├─ Test-Installation.ps1       Diagnose: warum laeuft die Aufgabe nicht?
+├─ Register-PackagePath.ps1    behebt "No module named cmkoffline2mail"
 ├─ Grant-BatchLogonRight.ps1   Recht "Anmelden als Stapelverarbeitungsauftrag"
 └─ Run-Task.cmd                Startskript der Aufgabe (protokolliert alles)
 

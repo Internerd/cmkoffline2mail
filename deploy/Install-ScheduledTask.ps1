@@ -123,9 +123,15 @@ try {
 
 # --- 1. Struktur pruefen ----------------------------------------------------
 $InstallDir = (Resolve-Path -LiteralPath $InstallDir).Path
-if (-not (Test-Path -LiteralPath (Join-Path $InstallDir "cmkoffline2mail\cli.py"))) {
-    throw ("In '$InstallDir' liegt kein cmkoffline2mail (erwartet: cmkoffline2mail\cli.py). " +
-           "Bitte den Inhalt des Repositories dorthin kopieren oder -InstallDir angeben.")
+$packageInit = Join-Path $InstallDir "cmkoffline2mail\__init__.py"
+if (-not (Test-Path -LiteralPath $packageInit)) {
+    Write-Host "Inhalt von '$InstallDir':" -ForegroundColor Yellow
+    Get-ChildItem -LiteralPath $InstallDir -ErrorAction SilentlyContinue |
+        ForEach-Object { Write-Host ("  {0}  {1}" -f $(if ($_.PSIsContainer) { "[Ordner]" } else { "[Datei] " }), $_.Name) }
+    throw ("In '$InstallDir' fehlt das Python-Paket (erwartet: cmkoffline2mail\__init__.py).`n" +
+           "Haeufige Ursache: Beim ZIP-Download steckt alles noch einmal in einem Ordner wie " +
+           "'cmkoffline2mail-main'. Es muss dessen INHALT in den Basisordner - nicht der Ordner selbst.`n" +
+           "Alternativ mit -InstallDir den richtigen Basisordner angeben.")
 }
 Write-Step "Basisordner: $InstallDir"
 
@@ -206,18 +212,44 @@ if (Test-Path -LiteralPath $pyvenvCfg) {
     }
 }
 
-# Funktionstest: laeuft das Programm mit dieser venv?
+# Das Paket in der venv bekanntmachen: eine .pth-Datei im site-packages der venv
+# nimmt den Basisordner dauerhaft in den Suchpfad auf. Damit funktioniert
+# "python -m cmkoffline2mail" unabhaengig vom Arbeitsverzeichnis - genau das ist
+# die Ursache der Meldung "No module named cmkoffline2mail".
+$sitePackages = & $venvPython -c "import sysconfig; print(sysconfig.get_paths()['purelib'])"
+if ($LASTEXITCODE -ne 0 -or -not $sitePackages) {
+    throw "site-packages der virtuellen Umgebung konnte nicht ermittelt werden."
+}
+$sitePackages = "$sitePackages".Trim()
+if (-not (Test-Path -LiteralPath $sitePackages)) {
+    New-Item -ItemType Directory -Path $sitePackages -Force | Out-Null
+}
+if ($InstallDir -match "[^\u0020-\u007E]") {
+    Write-Warning ("Der Basisordner enthaelt Sonderzeichen: '$InstallDir'. " +
+                   "Der Suchpfad-Eintrag (.pth) wird je nach Python-Version unterschiedlich " +
+                   "gelesen - ein Basisordner ohne Umlaute/Sonderzeichen ist zuverlaessiger.")
+}
+$pthFile = Join-Path $sitePackages "cmkoffline2mail.pth"
+Set-Content -LiteralPath $pthFile -Value $InstallDir -Encoding ASCII
+Write-Host "    Suchpfad eingetragen: $pthFile -> $InstallDir"
+
+# Funktionstest bewusst aus einem FREMDEN Arbeitsverzeichnis - so wie es die
+# Aufgabenplanung im Zweifel auch tut.
 $reported = & $venvPython -c "import sys; print(sys.version.split()[0])"
-Push-Location $InstallDir
+Push-Location $env:SystemRoot
 try {
     $selfTest = & $venvPython -m cmkoffline2mail --version 2>&1
-    if ($LASTEXITCODE -ne 0) { throw "Selbsttest fehlgeschlagen: $selfTest" }
+    if ($LASTEXITCODE -ne 0) {
+        throw ("Selbsttest fehlgeschlagen: $selfTest`n" +
+               "Das Paket ist aus der venv nicht importierbar. Bitte pruefen, ob " +
+               "'$packageInit' existiert.")
+    }
     # Bytecode vorab erzeugen - das gMSA erhaelt spaeter nur Leserechte.
     & $venvPython -m compileall -q (Join-Path $InstallDir "cmkoffline2mail") | Out-Null
 } finally {
     Pop-Location
 }
-Write-Host "    venv-Python $reported, $selfTest" -ForegroundColor Green
+Write-Host "    venv-Python $reported, $selfTest (Import ohne Arbeitsverzeichnis geprueft)" -ForegroundColor Green
 
 # --- 3. Verzeichnisse und Beispielkonfiguration -----------------------------
 foreach ($dir in @($configDir, $dataDir, $logDir)) {

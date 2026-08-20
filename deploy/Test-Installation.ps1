@@ -68,8 +68,13 @@ Write-Host ""
 
 # --- 1. Dateien -------------------------------------------------------------
 Write-Host "1. Verzeichnisstruktur" -ForegroundColor Cyan
-Test-Item "Python-Paket (cmkoffline2mail\cli.py)" { Test-Path (Join-Path $InstallDir "cmkoffline2mail\cli.py") } `
-          "Inhalt des Repositories in den Basisordner kopieren"
+Test-Item "Python-Paket (cmkoffline2mail\__init__.py)" { Test-Path (Join-Path $InstallDir "cmkoffline2mail\__init__.py") } `
+          "Inhalt des Repositories in den Basisordner kopieren (beim ZIP nur den INHALT von 'cmkoffline2mail-main')"
+if (-not (Test-Path (Join-Path $InstallDir "cmkoffline2mail\__init__.py"))) {
+    Write-Host "         Gefunden wurde stattdessen:" -ForegroundColor Yellow
+    Get-ChildItem -LiteralPath $InstallDir -ErrorAction SilentlyContinue |
+        ForEach-Object { Write-Host ("           {0}" -f $_.Name) -ForegroundColor Yellow }
+}
 Test-Item "Startskript (deploy\Run-Task.cmd)" { Test-Path $runner } "deploy\Run-Task.cmd mitkopieren"
 Test-Item "Konfiguration (config\config.toml)" { Test-Path $configPath } `
           "config\config.example.toml nach config\config.toml kopieren und anpassen"
@@ -88,14 +93,25 @@ if (Test-Path $venvPython) {
         if ($LASTEXITCODE -ne 0) { throw "$v" }
         "Python $v"
     }
-    Test-Item "Programm importierbar" {
-        Push-Location $InstallDir
+    # Bewusst aus einem FREMDEN Arbeitsverzeichnis - so wie es die
+    # Aufgabenplanung im Zweifel auch tut.
+    Test-Item "Programm importierbar (ohne passendes Arbeitsverzeichnis)" {
+        Push-Location $env:SystemRoot
         try {
             $v = & $venvPython -m cmkoffline2mail --version 2>&1
             if ($LASTEXITCODE -ne 0) { throw "$v" }
             "$v"
         } finally { Pop-Location }
-    } "Liegt das Paket wirklich unter dem Basisordner?"
+    } "Beheben mit:  .\deploy\Register-PackagePath.ps1"
+
+    $sitePackages = ("$(& $venvPython -c "import sysconfig; print(sysconfig.get_paths()['purelib'])")").Trim()
+    $pthFile = Join-Path $sitePackages "cmkoffline2mail.pth"
+    Test-Item "Suchpfad-Eintrag (cmkoffline2mail.pth) vorhanden" {
+        if (-not (Test-Path -LiteralPath $pthFile)) { return $false }
+        $eingetragen = (Get-Content $pthFile -ErrorAction SilentlyContinue | Select-Object -First 1)
+        if ("$eingetragen".Trim() -ne $InstallDir) { throw "zeigt auf '$eingetragen'" }
+        "$eingetragen"
+    } "Beheben mit:  .\deploy\Register-PackagePath.ps1"
 
     # Eine venv verweist dauerhaft auf ihr Basis-Python. Liegt das in einem
     # Benutzerprofil, kann ein Dienstkonto (gMSA) es nicht lesen.
