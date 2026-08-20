@@ -342,7 +342,8 @@ sind gleichwertig.
 wenn der Relay eine Anmeldung verlangt. Bei einem internen Relay, der die Server-IP
 freigibt, bleiben beide leer - das gMSA meldet sich dann nicht am SMTP an.
 
-`state.file` merkt sich, wer bereits benachrichtigt wurde (Schreibrecht fuer das gMSA noetig);
+`state.file` merkt sich, wer bereits benachrichtigt wurde (Schreibrecht fuer das gMSA noetig -
+im Basisordner selbst hat das Dienstkonto absichtlich nur Leserechte, deshalb `data\` und `logs\`);
 ohne Angabe `<Basisordner>\data\state.json`. `logging.file` rotiert automatisch
 (`max_bytes`, `backup_count`); ohne Angabe `<Basisordner>\logs\cmkoffline2mail.log`.
 
@@ -465,7 +466,8 @@ Es gibt bewusst **keine Entwarnungsmail**: gemeldet wird nur das Ausbleiben von 
 | `error: unrecognized arguments: C:\...` | Befehlszeile der Aufgabe enthaelt mehr als zwei Anfuehrungszeichen - Aufgabe mit `Install-ScheduledTask.ps1` neu registrieren |
 | `No module named cmkoffline2mail` | Suchpfad-Eintrag fehlt - `.\deploy\Register-PackagePath.ps1` ausfuehren. Kommt die Meldung danach weiter, liegt das Paket nicht unter dem Basisordner (ZIP-Doppelordner, siehe 2.1) |
 | Es kommen keine Mails mehr | Host wurde bereits gemeldet - `repeat_after` pruefen oder Statusdatei loeschen |
-| Keine Protokolldatei | `logging.file` liegt in einem Pfad ohne Schreibrecht fuer das gMSA |
+| `Protokolldatei ... Permission denied` | `logging.file` zeigt in einen Ordner ohne Schreibrecht - Angabe entfernen (dann `logs\`) oder Rechte setzen |
+| `ist kein gueltiges TOML` | Die Meldung zeigt Zeile und Stelle an. Meist fehlen Anfuehrungszeichen (`format = "html"`, nicht `format = html`) oder ein abschliessendes `"""` |
 
 ### Die Aufgabe laeuft, aber es passiert nichts
 

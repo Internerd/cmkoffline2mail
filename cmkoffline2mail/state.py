@@ -112,7 +112,11 @@ class NotificationState:
             os.replace(handle.name, self.path)
         except OSError as exc:
             _remove_quietly(handle.name)
-            raise OSError(f"Statusdatei '{self.path}' konnte nicht geschrieben werden: {exc}") from exc
+            raise OSError(
+                f"Statusdatei '{self.path}' konnte nicht geschrieben werden: {exc}\n"
+                f"Das ausfuehrende Konto braucht Schreibrechte auf '{self.path.parent}' "
+                f"(z. B. icacls \"{self.path.parent}\" /grant \"DOMAENE\\gmsa$:(OI)(CI)M\")."
+            ) from exc
         LOG.debug("Status mit %s Eintrag/Eintraegen gespeichert (%s)", len(self.hosts), self.path)
 
     # -- Auswertung ---------------------------------------------------------

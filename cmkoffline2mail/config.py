@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Sequence
@@ -20,6 +21,33 @@ except ModuleNotFoundError:  # pragma: no cover - Fallback fuer aeltere Interpre
 
 class ConfigError(Exception):
     """Fehler in der Konfigurationsdatei."""
+
+
+def format_toml_error(path: Path, exc: Exception) -> str:
+    """Bereitet einen TOML-Fehler auf: Datei, Meldung, betroffene Zeile, Hinweise."""
+    message = str(exc)
+    detail = ""
+
+    match = re.search(r"line (\d+), column (\d+)", message)
+    if match:
+        line_number, column = int(match.group(1)), int(match.group(2))
+        try:
+            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            lines = []
+        if 0 < line_number <= len(lines):
+            marker = " " * max(0, column - 1) + "^"
+            detail = f"\n  {line_number:>4} | {lines[line_number - 1]}\n       | {marker}"
+
+    hint = (
+        "\nHaeufige Ursachen:"
+        "\n  - Werte muessen in Anfuehrungszeichen stehen:  format = \"html\"  (nicht: format = html)"
+        "\n  - mehrzeiliger Text gehoert zwischen dreifache Anfuehrungszeichen (\"\"\")"
+        "\n  - ein abschliessendes \"\"\" fehlt"
+        "\n  - Backslashes in normalen Zeichenketten verdoppeln (C:\\\\Pfad) oder "
+        "'einfache Anfuehrungszeichen' verwenden"
+    )
+    return f"'{path}' ist kein gueltiges TOML: {message}{detail}{hint}"
 
 
 def install_root() -> Path:
@@ -342,7 +370,7 @@ def load_config(path: str | os.PathLike[str]) -> AppConfig:
     except OSError as exc:
         raise ConfigError(f"Konfigurationsdatei '{config_path}' nicht lesbar: {exc}") from exc
     except tomllib.TOMLDecodeError as exc:
-        raise ConfigError(f"Konfigurationsdatei '{config_path}' ist kein gueltiges TOML: {exc}") from exc
+        raise ConfigError(format_toml_error(config_path, exc)) from exc
 
     warnings: list[str] = []
     base_dir = config_path.resolve().parent
@@ -362,6 +390,19 @@ def load_config(path: str | os.PathLike[str]) -> AppConfig:
     folders = _parse_folders(data.get("folders"), behaviour, warnings)
 
     root.warn_unknown({"folders"})
+
+    # Dienstkonten haben im Basisordner ueblicherweise nur Leserechte.
+    base = install_root()
+    for label, target, empfohlen in (
+        ("state.file", state_file, "data"),
+        ("logging.file", log_cfg.file, "logs"),
+    ):
+        if target and target.parent == base:
+            warnings.append(
+                f"'{label}' zeigt direkt in den Basisordner ({target}). Dort hat das "
+                f"Dienstkonto in der Regel nur Leserechte - empfohlen: "
+                f"{base / empfohlen / target.name}"
+            )
 
     return AppConfig(
         checkmk=checkmk,

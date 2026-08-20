@@ -5,6 +5,7 @@ from pathlib import Path
 
 from cmkoffline2mail.config import (
     ConfigError,
+    format_toml_error,
     default_config_path,
     install_root,
     load_config,
@@ -191,6 +192,74 @@ class PathResolutionTest(unittest.TestCase):
         os.environ["CMKOFFLINE2MAIL_CONFIG"] = str(self.write())
         self.addCleanup(os.environ.pop, "CMKOFFLINE2MAIL_CONFIG", None)
         self.assertEqual(default_config_path(), self.config_path)
+
+
+class TomlErrorTest(unittest.TestCase):
+    """Die Fehlermeldung soll die betroffene Zeile zeigen."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.path = Path(self.tmp.name) / "mailtemplate.toml"
+
+    def test_shows_offending_line_and_marker(self):
+        self.path.write_text("# Kommentar\nformat = html\n", encoding="utf-8")
+        try:
+            import tomllib
+        except ModuleNotFoundError:  # pragma: no cover
+            self.skipTest("tomllib fehlt")
+        with self.path.open("rb") as handle:
+            try:
+                tomllib.load(handle)
+                self.fail("erwartet wurde ein TOML-Fehler")
+            except tomllib.TOMLDecodeError as exc:
+                message = format_toml_error(self.path, exc)
+
+        self.assertIn("format = html", message)
+        self.assertIn("^", message)
+        self.assertIn('format = "html"', message)   # Loesungshinweis
+        self.assertIn(str(self.path), message)
+
+    def test_survives_unreadable_file(self):
+        class FakeError(Exception):
+            pass
+
+        message = format_toml_error(Path("/gibt/es/nicht.toml"), FakeError("Invalid value (at line 3, column 1)"))
+        self.assertIn("nicht.toml", message)
+        self.assertIn("Haeufige Ursachen", message)
+
+    def test_broken_config_reports_line(self):
+        config = Path(self.tmp.name) / "config.toml"
+        config.write_text(MINIMAL.replace('username = "automation"', "username = automation"), encoding="utf-8")
+        with self.assertRaises(ConfigError) as ctx:
+            load_config(config)
+        self.assertIn("username = automation", str(ctx.exception))
+
+
+class WritableLocationWarningTest(unittest.TestCase):
+    """Status und Protokoll direkt im Basisordner sind unter einem Dienstkonto problematisch."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.path = Path(self.tmp.name) / "config.toml"
+
+    def test_warns_for_paths_in_the_install_root(self):
+        root = install_root()
+        text = MINIMAL + f'\n[state]\nfile = "{(root / "state.json").as_posix()}"\n'
+        text += f'\n[logging]\nfile = "{(root / "app.log").as_posix()}"\n'
+        self.path.write_text(text, encoding="utf-8")
+        config = load_config(self.path)
+        self.assertTrue(any("state.file" in warning for warning in config.warnings), config.warnings)
+        self.assertTrue(any("logging.file" in warning for warning in config.warnings), config.warnings)
+        self.assertTrue(any("data" in warning for warning in config.warnings))
+
+    def test_no_warning_for_subfolders(self):
+        root = install_root()
+        text = MINIMAL + f'\n[state]\nfile = "{(root / "data" / "state.json").as_posix()}"\n'
+        self.path.write_text(text, encoding="utf-8")
+        config = load_config(self.path)
+        self.assertFalse(any("state.file" in warning for warning in config.warnings), config.warnings)
 
 
 class NormalizeFolderTest(unittest.TestCase):

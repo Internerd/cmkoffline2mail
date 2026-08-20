@@ -17,6 +17,8 @@ except ModuleNotFoundError:  # pragma: no cover
     except ModuleNotFoundError:  # pragma: no cover
         tomllib = None  # type: ignore[assignment]
 
+from .config import format_toml_error
+
 LOG = logging.getLogger(__name__)
 
 _PLACEHOLDER = re.compile(r"\{\{\s*([A-Za-z0-9_]+)\s*\}\}")
@@ -118,7 +120,7 @@ class MailTemplate:
         except OSError as exc:
             raise TemplateError(f"Vorlagendatei '{template_path}' nicht lesbar: {exc}") from exc
         except tomllib.TOMLDecodeError as exc:
-            raise TemplateError(f"Vorlagendatei '{template_path}' ist kein gueltiges TOML: {exc}") from exc
+            raise TemplateError("Vorlagendatei " + format_toml_error(template_path, exc)) from exc
 
         fmt = str(data.get("format", "both")).strip().lower()
         if fmt not in ("text", "html", "both"):
