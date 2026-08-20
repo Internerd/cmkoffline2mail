@@ -22,6 +22,38 @@ class ConfigError(Exception):
     """Fehler in der Konfigurationsdatei."""
 
 
+def install_root() -> Path:
+    """Basisverzeichnis der Installation (der Ordner ueber dem Python-Paket).
+
+    Bei einer Kopier-Installation nach z. B. ``C:\\FIRMA\\cmkoffline2mail`` ist das
+    genau dieser Ordner - Konfiguration, Status und Protokoll liegen dann
+    standardmaessig darunter. Nur wenn das Paket per pip in ein site-packages
+    installiert wurde, wird auf %PROGRAMDATA% ausgewichen.
+    """
+    root = Path(__file__).resolve().parent.parent
+    if any(part in ("site-packages", "dist-packages") for part in root.parts):
+        return Path(os.environ.get("PROGRAMDATA", str(Path.home()))) / "cmkoffline2mail"
+    return root
+
+
+def default_config_path() -> Path:
+    """Sucht die Konfiguration an den ueblichen Stellen (fuer den Aufruf ohne --config)."""
+    candidates = []
+    from_env = os.environ.get("CMKOFFLINE2MAIL_CONFIG")
+    if from_env:
+        candidates.append(Path(os.path.expandvars(from_env)).expanduser())
+
+    root = install_root()
+    candidates.append(root / "config" / "config.toml")
+    candidates.append(root / "config.toml")
+    candidates.append(Path(os.environ.get("PROGRAMDATA", ".")) / "cmkoffline2mail" / "config.toml")
+
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    return candidates[0] if from_env else root / "config" / "config.toml"
+
+
 def normalize_folder(path: str) -> str:
     """Bringt Checkmk-Ordnerpfade auf eine einheitliche Form (``/a/b``)."""
     text = str(path).strip().replace("\\", "/").replace("~", "/")
@@ -37,10 +69,17 @@ def normalize_folder(path: str) -> str:
 class _Section:
     """Kleiner Helfer fuer typsichere Zugriffe mit sprechenden Fehlermeldungen."""
 
-    def __init__(self, data: dict[str, Any], path: str, warnings: list[str]):
+    def __init__(
+        self,
+        data: dict[str, Any],
+        path: str,
+        warnings: list[str],
+        base_dir: Path | None = None,
+    ):
         self._data = data
         self._path = path
         self._warnings = warnings
+        self._base_dir = base_dir
         self._seen: set[str] = set()
 
     @property
@@ -107,8 +146,14 @@ class _Section:
         return [item.strip() for item in value if item.strip()]
 
     def path(self, key: str, default: str = "", *, required: bool = False) -> Path | None:
+        """Liest einen Pfad; relative Angaben gelten relativ zur Konfigurationsdatei."""
         value = self.str(key, default, required=required)
-        return Path(os.path.expandvars(value)).expanduser() if value else None
+        if not value:
+            return None
+        resolved = Path(os.path.expandvars(value)).expanduser()
+        if not resolved.is_absolute() and self._base_dir is not None:
+            resolved = self._base_dir / resolved
+        return Path(os.path.normpath(resolved))
 
     def section(self, key: str, *, required: bool = False) -> "_Section":
         self._seen.add(key)
@@ -119,7 +164,7 @@ class _Section:
             value = {}
         if not isinstance(value, dict):
             raise ConfigError(f"'{self._where(key)}' muss ein Abschnitt sein")
-        return _Section(value, self._where(key), self._warnings)
+        return _Section(value, self._where(key), self._warnings, self._base_dir)
 
     def secret(self, key: str) -> str:
         """Liest ein Geheimnis aus ``key``, ``key_env`` oder ``key_file``."""
@@ -281,7 +326,6 @@ class AppConfig:
         return max(candidates, key=lambda rule: rule.specificity)
 
 
-_DEFAULT_STATE_DIR = Path(os.environ.get("PROGRAMDATA", "/var/lib")) / "cmkoffline2mail"
 
 
 def load_config(path: str | os.PathLike[str]) -> AppConfig:
@@ -301,7 +345,8 @@ def load_config(path: str | os.PathLike[str]) -> AppConfig:
         raise ConfigError(f"Konfigurationsdatei '{config_path}' ist kein gueltiges TOML: {exc}") from exc
 
     warnings: list[str] = []
-    root = _Section(data, "", warnings)
+    base_dir = config_path.resolve().parent
+    root = _Section(data, "", warnings, base_dir)
 
     checkmk = _parse_checkmk(root.section("checkmk", required=True))
     behaviour = _parse_behaviour(root.section("behaviour"))
@@ -310,9 +355,8 @@ def load_config(path: str | os.PathLike[str]) -> AppConfig:
     log_cfg = _parse_logging(root.section("logging"))
 
     state_section = root.section("state")
-    state_file = state_section.path("file", str(_DEFAULT_STATE_DIR / "state.json")) or (
-        _DEFAULT_STATE_DIR / "state.json"
-    )
+    default_state = install_root() / "data" / "state.json"
+    state_file = state_section.path("file", str(default_state)) or default_state
     state_section.warn_unknown()
 
     folders = _parse_folders(data.get("folders"), behaviour, warnings)
@@ -391,9 +435,7 @@ def _parse_behaviour(section: _Section) -> BehaviourConfig:
 def _parse_mail(section: _Section, config_path: Path) -> MailConfig:
     template = section.path("template")
     if template is None:
-        template = config_path.parent / "mailtemplate.toml"
-    elif not template.is_absolute():
-        template = config_path.parent / template
+        template = config_path.resolve().parent / "mailtemplate.toml"
 
     config = MailConfig(
         sender=section.str("from", required=True),
@@ -440,7 +482,7 @@ def _parse_logging(section: _Section) -> LoggingConfig:
         raise ConfigError(f"'logging.level' ist ungueltig: {level}")
     config = LoggingConfig(
         level=level,
-        file=section.path("file", str(_DEFAULT_STATE_DIR / "cmkoffline2mail.log")),
+        file=section.path("file", str(install_root() / "logs" / "cmkoffline2mail.log")),
         max_bytes=section.int("max_bytes", 5 * 1024 * 1024, minimum=0),
         backup_count=section.int("backup_count", 5, minimum=0),
         console=section.bool("console", True),

@@ -3,11 +3,18 @@ __pycache__/
 build/
 dist/
 *.egg-info/
+
+# Virtuelle Umgebung im Basisordner
 .venv/
 venv/
 
-# Lokale Konfiguration und Laufzeitdaten (enthalten Zugangsdaten!)
+# Lokale Konfiguration und Laufzeitdaten (enthalten Zugangsdaten bzw. Zustand)
 config/config.toml
 config/mailtemplate.toml
+config/*.pem
+config/secret.txt
+config/smtp.txt
+data/
+logs/
 *.log
 state.json

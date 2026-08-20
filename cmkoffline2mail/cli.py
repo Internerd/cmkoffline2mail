@@ -11,7 +11,7 @@ from pathlib import Path
 
 from . import __version__
 from .checkmk import CheckmkClient, CheckmkError, MonitoredHost
-from .config import AppConfig, ConfigError, load_config
+from .config import AppConfig, ConfigError, default_config_path, install_root, load_config
 from .evaluate import (
     NotificationGroup,
     attribute_placeholder,
@@ -31,7 +31,6 @@ EXIT_OK = 0
 EXIT_ERROR = 1
 EXIT_CONFIG = 2
 
-DEFAULT_CONFIG = Path(os.environ.get("PROGRAMDATA", ".")) / "cmkoffline2mail" / "config.toml"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -45,8 +44,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "-c",
         "--config",
-        default=str(DEFAULT_CONFIG),
-        help=f"Pfad zur Konfigurationsdatei (Standard: {DEFAULT_CONFIG})",
+        default=None,
+        help=(
+            "Pfad zur Konfigurationsdatei. Ohne Angabe wird gesucht in: "
+            "%%CMKOFFLINE2MAIL_CONFIG%%, <Basisordner>\\config\\config.toml, "
+            "<Basisordner>\\config.toml"
+        ),
     )
     parser.add_argument(
         "-t",
@@ -96,8 +99,9 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     setup_basic_logging(args.log_level or "INFO")
 
+    config_path = Path(args.config) if args.config else default_config_path()
     try:
-        config = load_config(args.config)
+        config = load_config(config_path)
     except ConfigError as exc:
         LOG.error("Konfigurationsfehler: %s", exc)
         return EXIT_CONFIG
@@ -110,7 +114,12 @@ def main(argv: list[str] | None = None) -> int:
     for message in config.warnings:
         LOG.warning(message)
 
-    LOG.debug("cmkoffline2mail %s, Konfiguration: %s", __version__, config.source)
+    LOG.debug(
+        "cmkoffline2mail %s, Basisordner: %s, Konfiguration: %s",
+        __version__,
+        install_root(),
+        config.source,
+    )
 
     template_path = Path(args.template) if args.template else config.mail.template
     try:
@@ -151,10 +160,13 @@ def main(argv: list[str] | None = None) -> int:
 
 def _validate(config: AppConfig, template: MailTemplate) -> int:
     LOG.info("Konfiguration '%s' ist gueltig", config.source)
+    LOG.info("Basisordner: %s", install_root())
+    LOG.info("Python: %s", sys.executable)
     LOG.info("Checkmk-API: %s (Benutzer: %s)", config.checkmk.api_url, config.checkmk.username)
     LOG.info("SMTP: %s:%s (%s)", config.smtp.host, config.smtp.port, config.smtp.security)
     LOG.info("Empfaenger: %s", ", ".join(config.mail.recipients) or "(nur cc/bcc)")
     LOG.info("Statusdatei: %s", config.state_file)
+    LOG.info("Protokolldatei: %s", config.logging.file or "(nur Konsole)")
     if config.checkmk.custom_attributes:
         LOG.info(
             "Custom-Attribute: %s",

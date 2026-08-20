@@ -21,6 +21,7 @@ Gedacht fuer den unbeaufsichtigten Betrieb auf einem **Windows Server** in der
 |---|---|
 | Windows | Server 2016 oder neuer |
 | Python | 3.11 oder neuer, von <https://www.python.org/downloads/windows/> ("Install for all users") |
+| Ablage | ein frei waehlbarer Basisordner, z. B. `C:\FIRMA\cmkoffline2mail` |
 | Checkmk | 2.3.x, erreichbar per HTTPS, Automationsbenutzer vorhanden |
 | SMTP | Relay/Smarthost erreichbar (mit oder ohne Anmeldung) |
 | AD | gMSA-Konto fuer die Aufgabenplanung |
@@ -29,36 +30,69 @@ Gedacht fuer den unbeaufsichtigten Betrieb auf einem **Windows Server** in der
 
 ## 2. Installation Schritt fuer Schritt
 
-### 2.1 Dateien auf den Server kopieren
-
-```powershell
-# Auf dem Windows Server, administrative PowerShell
-New-Item -ItemType Directory "C:\Program Files\cmkoffline2mail" -Force
-# Inhalt dieses Repositories dorthin kopieren (git clone, Copy-Item oder ZIP entpacken)
-```
-
-Danach muss das Verzeichnis so aussehen (der Paketordner traegt denselben Namen wie
-das Wurzelverzeichnis - das ist Absicht, alle Python-Dateien liegen eine Ebene tiefer):
+Die gesamte Installation liegt in **einem frei waehlbaren Basisordner**. In dieser
+Anleitung ist das `C:\FIRMA\cmkoffline2mail` - `FIRMA` steht dabei fuer Ihren
+eigenen Ordnernamen. Programm, virtuelle Umgebung, Konfiguration, Status und
+Protokolle liegen alle darunter:
 
 ```
-C:\Program Files\cmkoffline2mail\
-├─ cmkoffline2mail\      <- Python-Paket: cli.py, config.py, checkmk.py, ...
-├─ config\               <- Beispielkonfigurationen
-├─ deploy\               <- PowerShell-Skripte
+C:\FIRMA\cmkoffline2mail\
+├─ .venv\               virtuelle Python-Umgebung (Schritt 2.2)
+├─ cmkoffline2mail\     Python-Paket (cli.py, config.py, checkmk.py, ...)
+├─ config\              config.toml + mailtemplate.toml
+├─ data\                state.json (wird angelegt)
+├─ logs\                Protokolle (werden angelegt)
+├─ deploy\              PowerShell-Skripte, Run-Task.cmd
 ├─ tests\
+├─ run.cmd              Handaufruf mit der venv
 ├─ pyproject.toml
 └─ README.md
 ```
 
-Schnelltest - beide Befehle muessen ohne Fehler durchlaufen:
+Ausserhalb dieses Ordners wird nichts abgelegt. Alle Pfadangaben in der
+Konfiguration duerfen relativ sein und gelten dann relativ zur `config.toml` -
+der Basisordner laesst sich also spaeter umbenennen oder verschieben.
+
+### 2.1 Dateien auf den Server kopieren
 
 ```powershell
-Test-Path "C:\Program Files\cmkoffline2mail\cmkoffline2mail\cli.py"   # muss True sein
-cd "C:\Program Files\cmkoffline2mail"
-python -m cmkoffline2mail --version
+# Auf dem Windows Server, administrative PowerShell
+New-Item -ItemType Directory "C:\FIRMA\cmkoffline2mail" -Force
+# Inhalt dieses Repositories dorthin kopieren (git clone, Copy-Item oder ZIP entpacken)
 ```
 
-### 2.2 Automationsbenutzer in Checkmk anlegen
+> Beim ZIP-Download von GitHub steckt alles noch einmal in einem Ordner wie
+> `cmkoffline2mail-main\`. Es muss dessen **Inhalt** in den Basisordner - nicht
+> der Ordner selbst.
+
+Schnelltest - muss `True` liefern:
+
+```powershell
+Test-Path "C:\FIRMA\cmkoffline2mail\cmkoffline2mail\cli.py"
+```
+
+### 2.2 Virtuelle Umgebung (venv)
+
+Das Programm braucht keine Fremdpakete, eine venv ist trotzdem sinnvoll: sie
+bindet die Ausfuehrung an eine bestimmte Python-Version und macht sie unabhaengig
+von spaeteren Aenderungen am System-Python.
+
+```powershell
+cd "C:\FIRMA\cmkoffline2mail"
+& "C:\Program Files\Python311\python.exe" -m venv .venv
+.\.venv\Scripts\python.exe -m cmkoffline2mail --version
+```
+
+`Install-ScheduledTask.ps1` (Schritt 2.7) legt die venv bei Bedarf selbst an.
+
+> **Wichtig fuer die Aufgabenplanung:** Ein `activate` gibt es dort nicht und wird
+> auch nicht gebraucht. Die Aufgabe ruft direkt
+> `C:\FIRMA\cmkoffline2mail\.venv\Scripts\python.exe` auf - diese `python.exe`
+> erkennt ihre Umgebung ueber die daneben liegende `pyvenv.cfg` selbst. Wichtig
+> ist nur, dass **nicht** das System-Python eingetragen wird und dass das
+> Arbeitsverzeichnis der Basisordner ist.
+
+### 2.3 Automationsbenutzer in Checkmk anlegen
 
 1. In Checkmk: **Setup → Users → Add user**
 2. Haken bei **Automation secret for machine accounts** setzen, Geheimnis notieren
@@ -77,7 +111,7 @@ curl.exe -H "Authorization: Bearer automation DAS-GEHEIMNIS" `
          "https://cmk.firma.local/produktion/check_mk/api/1.0/version"
 ```
 
-### 2.3 gMSA anlegen und auf dem Server nutzbar machen
+### 2.4 gMSA anlegen und auf dem Server nutzbar machen
 
 Auf einem Domaincontroller (einmalig, falls noch kein KDS-Rootkey existiert):
 
@@ -96,88 +130,107 @@ Install-ADServiceAccount svc-cmkmail
 Test-ADServiceAccount   svc-cmkmail          # muss True liefern
 
 # Recht "Als Stapelverarbeitungsauftrag anmelden" vergeben:
-cd "C:\Program Files\cmkoffline2mail\deploy"
+cd "C:\FIRMA\cmkoffline2mail\deploy"
 .\Grant-BatchLogonRight.ps1 -Account "FIRMA\svc-cmkmail$"
 ```
 
-> Ohne dieses Recht bricht die Aufgabe mit `0x1` bzw. "Dem Benutzer wurde der
-> angeforderte Anmeldetyp nicht gewaehrt" ab.
+> Ohne dieses Recht startet die Aufgabe nicht, endet mit `0x1` und erzeugt
+> **keinerlei** Ausgabe - auch keine Protokolldatei.
 
-### 2.4 Konfiguration anlegen
+### 2.5 Konfiguration anlegen
 
 ```powershell
-New-Item -ItemType Directory "C:\ProgramData\cmkoffline2mail" -Force
-Copy-Item "C:\Program Files\cmkoffline2mail\config\config.example.toml" `
-          "C:\ProgramData\cmkoffline2mail\config.toml"
-Copy-Item "C:\Program Files\cmkoffline2mail\config\mailtemplate.example.toml" `
-          "C:\ProgramData\cmkoffline2mail\mailtemplate.toml"
-notepad "C:\ProgramData\cmkoffline2mail\config.toml"
+cd "C:\FIRMA\cmkoffline2mail"
+Copy-Item config\config.example.toml       config\config.toml
+Copy-Item config\mailtemplate.example.toml config\mailtemplate.toml
+notepad config\config.toml
 ```
 
 Mindestens anzupassen: `checkmk.url`, `checkmk.username`, `checkmk.secret`,
 die `[[folders]]`-Abschnitte, `mail.from`, `mail.to` und `smtp.host`.
+Status- und Protokolldatei brauchen keine Angabe - ohne `state.file` bzw.
+`logging.file` landen sie in `data\` und `logs\` unter dem Basisordner.
 
-Die vorhandenen Ordnerpfade liefert:
+Die vorhandenen Ordnerpfade und Attributnamen liefern:
 
 ```powershell
-python -m cmkoffline2mail -c "C:\ProgramData\cmkoffline2mail\config.toml" --list-folders
+.\run.cmd --list-folders
+.\run.cmd --show-attributes srv-a01
 ```
 
-Die Namen der Custom-Attribute eines Hosts (fuer `custom_attributes`) liefert:
+### 2.6 Rechte setzen
+
+Die Konfiguration enthaelt Zugangsdaten. `Install-ScheduledTask.ps1` erledigt das
+automatisch; von Hand:
 
 ```powershell
-python -m cmkoffline2mail -c "C:\ProgramData\cmkoffline2mail\config.toml" --show-attributes srv-a01
-```
-
-### 2.5 Rechte auf die Konfiguration setzen
-
-Die Datei enthaelt Zugangsdaten - Vererbung entfernen und nur die noetigen Konten berechtigen
-(erledigt auch `Install-ScheduledTask.ps1` automatisch):
-
-```powershell
-icacls "C:\ProgramData\cmkoffline2mail" /inheritance:r
-icacls "C:\ProgramData\cmkoffline2mail" /grant:r "*S-1-5-18:(OI)(CI)F"
-icacls "C:\ProgramData\cmkoffline2mail" /grant:r "*S-1-5-32-544:(OI)(CI)F"
-icacls "C:\ProgramData\cmkoffline2mail" /grant:r "FIRMA\svc-cmkmail$:(OI)(CI)M"
+$Base = "C:\FIRMA\cmkoffline2mail"
+$Gmsa = "FIRMA\svc-cmkmail$"
+icacls $Base /inheritance:r
+icacls $Base /grant:r "*S-1-5-18:(OI)(CI)F"          # SYSTEM
+icacls $Base /grant:r "*S-1-5-32-544:(OI)(CI)F"      # Administratoren
+icacls $Base /grant:r "$Gmsa:(OI)(CI)RX"             # gMSA: lesen/ausfuehren
+icacls "$Base\data" /grant:r "$Gmsa:(OI)(CI)M"       # ... und schreiben
+icacls "$Base\logs" /grant:r "$Gmsa:(OI)(CI)M"
 ```
 
 Alternativ das Geheimnis aus einer separaten Datei oder Umgebungsvariablen lesen
 (`secret_file` / `secret_env`, ebenso `password_file` / `password_env`).
 
-### 2.6 Testen
+### 2.7 Testen
 
 ```powershell
-cd "C:\Program Files\cmkoffline2mail"
-$cfg = "C:\ProgramData\cmkoffline2mail\config.toml"
-
-python -m cmkoffline2mail -c $cfg --validate          # Konfiguration + Vorlage pruefen
-python -m cmkoffline2mail -c $cfg --dry-run           # Checkmk abfragen, Mails nur anzeigen
-python -m cmkoffline2mail -c $cfg --test-mail ich@firma.de   # eine Testmail verschicken
+cd "C:\FIRMA\cmkoffline2mail"
+.\run.cmd --validate                    # Konfiguration + Vorlage pruefen
+.\run.cmd --dry-run                     # Checkmk abfragen, Mails nur anzeigen
+.\run.cmd --test-mail ich@firma.de      # eine Testmail verschicken
 ```
 
-### 2.7 Geplante Aufgabe einrichten
+`run.cmd` verwendet automatisch die venv aus dem Basisordner.
+
+### 2.8 Geplante Aufgabe einrichten
 
 ```powershell
-cd "C:\Program Files\cmkoffline2mail\deploy"
-.\Install-ScheduledTask.ps1 -GmsaAccount "FIRMA\svc-cmkmail$" `
-                            -PythonExe "C:\Program Files\Python311\python.exe" `
-                            -IntervalMinutes 15
+cd "C:\FIRMA\cmkoffline2mail\deploy"
+.\Install-ScheduledTask.ps1 -GmsaAccount "FIRMA\svc-cmkmail$" -IntervalMinutes 15 -RunNow
 ```
 
-Das Skript legt das Datenverzeichnis an, setzt die NTFS-Rechte und registriert die
-Aufgabe (Wiederholung alle 15 Minuten, `MultipleInstances = IgnoreNew`,
-Zeitlimit 30 Minuten). Kontrolle:
+Ohne `-InstallDir` wird der Ordner ueber dem Skript verwendet - das Skript laeuft
+also einfach dort, wo es liegt. Es legt bei Bedarf die venv an, erstellt
+`config\`, `data\` und `logs\`, setzt die NTFS-Rechte, registriert die Aufgabe und
+schreibt einen Mitschnitt nach `logs\install-<Zeitstempel>.log`. Mit `-RunNow`
+startet direkt ein Testlauf und die Ausgabe wird angezeigt.
+
+Weitere Schalter: `-InstallDir`, `-TaskName`, `-PythonExe`, `-TimeLimitMinutes`,
+`-SkipVenv`.
+
+Die Aufgabe startet nicht direkt `python.exe`, sondern `deploy\Run-Task.cmd`.
+Dieser Wrapper leitet **alle** Ausgaben nach `logs\task-run.log` um - auch
+Fehler, die auftreten, bevor das Programmprotokoll ueberhaupt existiert
+(fehlende venv, falsche Rechte, falscher Pfad). Ohne diesen Umweg verschluckt
+die Aufgabenplanung solche Meldungen vollstaendig.
+
+Kontrolle:
 
 ```powershell
 Start-ScheduledTask -TaskName cmkoffline2mail
-Get-ScheduledTaskInfo -TaskName cmkoffline2mail      # LastTaskResult 0 = in Ordnung
-Get-Content "C:\ProgramData\cmkoffline2mail\cmkoffline2mail.log" -Tail 30
+Get-ScheduledTaskInfo -TaskName cmkoffline2mail          # LastTaskResult 0 = in Ordnung
+Get-Content "C:\FIRMA\cmkoffline2mail\logs\task-run.log" -Tail 40
+Get-Content "C:\FIRMA\cmkoffline2mail\logs\cmkoffline2mail.log" -Tail 30
 ```
+
+Wenn etwas nicht laeuft:
+
+```powershell
+.\deploy\Test-Installation.ps1
+```
+
+Das Skript prueft Struktur, venv, Konfiguration, Aufgabe, Anmelderecht,
+NTFS-Rechte und zeigt die letzten Protokollzeilen samt Bedeutung des
+`LastTaskResult`. Es aendert nichts.
 
 > **Intervall und Schwellwert:** Die Aufgabe sollte deutlich haeufiger laufen als der
 > kleinste `offline_for`-Wert - sonst wird die Meldung entsprechend spaeter zugestellt.
-
----
 
 ## 3. Konfigurationsdatei 1: `config.toml`
 
@@ -238,8 +291,13 @@ sind gleichwertig.
 wenn der Relay eine Anmeldung verlangt. Bei einem internen Relay, der die Server-IP
 freigibt, bleiben beide leer - das gMSA meldet sich dann nicht am SMTP an.
 
-`state.file` merkt sich, wer bereits benachrichtigt wurde (Schreibrecht fuer das gMSA noetig).
-`logging.file` rotiert automatisch (`max_bytes`, `backup_count`).
+`state.file` merkt sich, wer bereits benachrichtigt wurde (Schreibrecht fuer das gMSA noetig);
+ohne Angabe `<Basisordner>\data\state.json`. `logging.file` rotiert automatisch
+(`max_bytes`, `backup_count`); ohne Angabe `<Basisordner>\logs\cmkoffline2mail.log`.
+
+**Alle Pfadangaben** (`template`, `state.file`, `logging.file`, `ca_bundle`,
+`secret_file`, `password_file`) duerfen relativ angegeben werden - sie gelten dann
+relativ zur `config.toml`. Umgebungsvariablen wie `%PROGRAMDATA%` werden aufgeloest.
 
 ---
 
@@ -293,9 +351,12 @@ einem Fehler - `--validate` zeigt ihn vor dem Produktivbetrieb an.
 ## 5. Aufrufe
 
 ```
-python -m cmkoffline2mail [-c KONFIG] [Optionen]
+run.cmd [Optionen]                          # nutzt die venv aus dem Basisordner
+.venv\Scripts\python.exe -m cmkoffline2mail [-c KONFIG] [Optionen]
 
--c, --config PFAD      Konfigurationsdatei (Standard: %PROGRAMDATA%\cmkoffline2mail\config.toml)
+-c, --config PFAD      Konfigurationsdatei. Ohne Angabe wird der Reihe nach gesucht in
+                       %CMKOFFLINE2MAIL_CONFIG%, <Basisordner>\config\config.toml,
+                       <Basisordner>\config.toml
 -t, --template PFAD    andere Mail-Vorlage verwenden
     --validate         nur Konfiguration und Vorlage pruefen (keine Verbindung)
 -n, --dry-run          Checkmk abfragen, Mails nur anzeigen, Status nicht veraendern
@@ -344,10 +405,40 @@ Es gibt bewusst **keine Entwarnungsmail**: gemeldet wird nur das Ausbleiben von 
 | `Fuer N Host(s) war kein Setup-Ordner ermittelbar` | Der Rolle fehlt der Setup-Zugriff, oder der Host existiert nur im Monitoring |
 | `Ordner nicht konfiguriert` im Protokoll | erwartetes Verhalten - Ordner mit `--list-folders` pruefen |
 | `SMTP-Anmeldung ... fehlgeschlagen` | `smtp.username`/`password` pruefen; bei IP-Freigabe beide leer lassen |
-| Aufgabe endet mit `0x1` | gMSA fehlt *Als Stapelverarbeitungsauftrag anmelden* (`Grant-BatchLogonRight.ps1`) |
+| Aufgabe endet mit `0x1`, keine Protokolldatei | gMSA fehlt *Als Stapelverarbeitungsauftrag anmelden* (`Grant-BatchLogonRight.ps1`) |
+| Aufgabe endet mit `0x2` / `0x80070002` | Pfad in der Aufgabe stimmt nicht - Aufgabe neu registrieren |
+| Aufgabe endet mit `0x8007010B` | Arbeitsverzeichnis der Aufgabe ist ungueltig |
 | Aufgabe endet mit `2` | `--validate` von Hand ausfuehren, die Meldung nennt den Schluessel |
+| Aufgabe endet mit `9` | Wrapper findet `.venv\Scripts\python.exe` nicht |
+| `No module named cmkoffline2mail` | Arbeitsverzeichnis ist nicht der Basisordner |
 | Es kommen keine Mails mehr | Host wurde bereits gemeldet - `repeat_after` pruefen oder Statusdatei loeschen |
 | Keine Protokolldatei | `logging.file` liegt in einem Pfad ohne Schreibrecht fuer das gMSA |
+
+### Die Aufgabe laeuft, aber es passiert nichts
+
+Es gibt drei Protokolle - in dieser Reihenfolge nachsehen:
+
+| Datei | Inhalt |
+|---|---|
+| `logs\task-run.log` | Ausgabe jedes Aufgabenlaufs, inklusive Fehlern **vor** dem Programmstart |
+| `logs\cmkoffline2mail.log` | Programmprotokoll (rotierend) |
+| `logs\install-*.log` | Mitschnitt der Installation |
+
+Existiert `logs\task-run.log` gar nicht, hat die Aufgabenplanung den Wrapper nie
+gestartet - dann liegt es am Konto (Anmelderecht), nicht am Programm.
+
+Alles auf einmal pruefen:
+
+```powershell
+cd "C:\FIRMA\cmkoffline2mail"
+.\deploy\Test-Installation.ps1
+```
+
+Zusaetzlich hilft der Verlauf der Aufgabenplanung, falls er abgeschaltet ist:
+
+```powershell
+wevtutil sl Microsoft-Windows-TaskScheduler/Operational /e:true
+```
 
 Fuer Details `--log-level DEBUG` setzen - dann werden auch die angefragten URLs protokolliert
 (das Automationsgeheimnis wird nie protokolliert).
@@ -363,7 +454,7 @@ python -m unittest discover -s tests -t .
 Die Tests kommen ohne Netzwerk, Checkmk und SMTP-Server aus.
 
 ```
-cmkoffline2mail/
+cmkoffline2mail/     Python-Paket
 ├─ cli.py            Kommandozeile und Hauptablauf
 ├─ config.py         Einlesen und Pruefen von config.toml
 ├─ checkmk.py        REST-API-Client (Monitoring + Setup)
@@ -373,4 +464,12 @@ cmkoffline2mail/
 ├─ state.py          Statusdatei gegen wiederholte Mails
 ├─ duration.py       Zeitangaben wie "1d12h"
 └─ logging_setup.py  Datei- und Konsolenprotokoll
+
+deploy/
+├─ Install-ScheduledTask.ps1   venv, Verzeichnisse, Rechte, Aufgabe
+├─ Test-Installation.ps1       Diagnose: warum laeuft die Aufgabe nicht?
+├─ Grant-BatchLogonRight.ps1   Recht "Anmelden als Stapelverarbeitungsauftrag"
+└─ Run-Task.cmd                Startskript der Aufgabe (protokolliert alles)
+
+run.cmd                        Handaufruf mit der venv
 ```

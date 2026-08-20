@@ -1,7 +1,22 @@
 # =====================================================================
 # cmkoffline2mail - Hauptkonfiguration
-# Empfohlener Ablageort: C:\ProgramData\cmkoffline2mail\config.toml
-# Rechte: nur SYSTEM, Administratoren und das gMSA-Konto (Lesen)
+#
+# Ablageort: <Basisordner>\config\config.toml
+# Der Basisordner ist frei waehlbar, z. B. C:\FIRMA\cmkoffline2mail:
+#
+#   C:\FIRMA\cmkoffline2mail\
+#   ├─ .venv\             virtuelle Python-Umgebung
+#   ├─ cmkoffline2mail\   Python-Paket
+#   ├─ config\            diese Datei + mailtemplate.toml
+#   ├─ data\              state.json (wird angelegt)
+#   ├─ logs\              Protokoll (wird angelegt)
+#   └─ deploy\            PowerShell-Skripte
+#
+# ALLE Pfade in dieser Datei duerfen relativ angegeben werden - sie gelten
+# dann relativ zu DIESER Datei. Damit bleibt die Konfiguration unabhaengig
+# vom gewaehlten Basisordner. Absolute Pfade sind ebenfalls erlaubt.
+#
+# Rechte: nur SYSTEM, Administratoren und das gMSA-Konto
 # =====================================================================
 
 [checkmk]
@@ -11,12 +26,12 @@ url      = "https://cmk.firma.local/produktion"
 username = "automation"
 
 # Das Automationsgeheimnis EINE der folgenden Varianten:
-secret      = "BITTE-ERSETZEN"                                   # a) direkt (Datei-ACL setzen!)
-# secret_env  = "CMK_AUTOMATION_SECRET"                          # b) aus Umgebungsvariable
-# secret_file = "C:/ProgramData/cmkoffline2mail/secret.txt"      # c) aus separater Datei
+secret      = "BITTE-ERSETZEN"           # a) direkt (Datei-ACL setzen!)
+# secret_env  = "CMK_AUTOMATION_SECRET"  # b) aus Umgebungsvariable
+# secret_file = "secret.txt"             # c) aus separater Datei (neben dieser Datei)
 
 verify_tls = true            # false nur bei selbstsigniertem Zertifikat ohne CA-Bundle
-# ca_bundle = "C:/ProgramData/cmkoffline2mail/firmen-ca.pem"
+# ca_bundle = "firmen-ca.pem" # relativ zu dieser Datei
 timeout    = 30              # Sekunden pro Anfrage
 retries    = 2               # Wiederholungen bei Netz-/5xx-Fehlern
 # sites    = ["produktion"]  # nur diese Livestatus-Sites abfragen (leer = alle)
@@ -101,23 +116,25 @@ security = "starttls"        # none | starttls | ssl
 # username     = "checkmk@firma.de"
 # password     = "geheim"
 # password_env = "CMK_SMTP_PASSWORD"
-# password_file = "C:/ProgramData/cmkoffline2mail/smtp.txt"
+# password_file = "smtp.txt"       # relativ zu dieser Datei
 
 timeout    = 30
 verify_tls = true
-# ca_bundle = "C:/ProgramData/cmkoffline2mail/firmen-ca.pem"
+# ca_bundle = "firmen-ca.pem"
 # helo_name = "srv-monitor.firma.local"
 
 
 [state]
 # Merkt sich, wer schon benachrichtigt wurde (verhindert Mails bei jedem Lauf).
 # Das gMSA-Konto braucht hier Schreibrechte.
-file = "C:/ProgramData/cmkoffline2mail/state.json"
+# Ohne Angabe: <Basisordner>\data\state.json
+# file = "../data/state.json"
 
 
 [logging]
 level        = "INFO"        # DEBUG | INFO | WARNING | ERROR
-file         = "C:/ProgramData/cmkoffline2mail/cmkoffline2mail.log"
+# Ohne Angabe: <Basisordner>\logs\cmkoffline2mail.log
+# file       = "../logs/cmkoffline2mail.log"
 max_bytes    = 5242880       # 5 MB je Datei
 backup_count = 5
 console      = true          # Ausgabe zusaetzlich nach stdout (Aufgabenplanung)

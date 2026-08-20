@@ -1,6 +1,6 @@
 # =====================================================================
 # cmkoffline2mail - Mail-Vorlage (zweite Konfigurationsdatei)
-# Empfohlener Ablageort: C:\ProgramData\cmkoffline2mail\mailtemplate.toml
+# Ablageort: <Basisordner>\config\mailtemplate.toml
 # =====================================================================
 #
 # format = "text"  -> nur Textmail

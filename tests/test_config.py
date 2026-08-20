@@ -3,7 +3,13 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from cmkoffline2mail.config import ConfigError, load_config, normalize_folder
+from cmkoffline2mail.config import (
+    ConfigError,
+    default_config_path,
+    install_root,
+    load_config,
+    normalize_folder,
+)
 
 MINIMAL = """
 [checkmk]
@@ -127,6 +133,64 @@ include_subfolders = false
     def test_broken_toml(self):
         with self.assertRaises(ConfigError):
             load_config(self.write("[checkmk\nurl ="))
+
+
+class PathResolutionTest(unittest.TestCase):
+    """Alle Pfade sollen relativ zur Konfigurationsdatei gelten."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.dir = Path(self.tmp.name)
+        (self.dir / "config").mkdir()
+        self.config_path = self.dir / "config" / "config.toml"
+
+    def write(self, extra: str = "") -> Path:
+        self.config_path.write_text(MINIMAL + extra, encoding="utf-8")
+        return self.config_path
+
+    def test_relative_paths_are_relative_to_the_config_file(self):
+        config = load_config(
+            self.write('\n[state]\nfile = "../data/state.json"\n\n[logging]\nfile = "../logs/app.log"\n')
+        )
+        self.assertEqual(config.state_file, self.dir / "data" / "state.json")
+        self.assertEqual(config.logging.file, self.dir / "logs" / "app.log")
+
+    def test_template_defaults_next_to_the_config_file(self):
+        config = load_config(self.write())
+        self.assertEqual(config.mail.template, self.dir / "config" / "mailtemplate.toml")
+
+    def test_relative_template(self):
+        self.config_path.write_text(
+            MINIMAL.replace('to = ["it@example.com"]', 'to = ["it@example.com"]\ntemplate = "vorlagen/mail.toml"'),
+            encoding="utf-8",
+        )
+        config = load_config(self.config_path)
+        self.assertEqual(config.mail.template, self.dir / "config" / "vorlagen" / "mail.toml")
+
+    def test_absolute_paths_are_kept(self):
+        absolute = Path(self.tmp.name).resolve() / "woanders" / "state.json"
+        config = load_config(self.write(f'\n[state]\nfile = "{absolute.as_posix()}"\n'))
+        self.assertEqual(config.state_file, absolute)
+
+    def test_relative_secret_file(self):
+        (self.dir / "config" / "secret.txt").write_text("geheim\n", encoding="utf-8")
+        self.config_path.write_text(
+            MINIMAL.replace('secret = "s3cr3t"', 'secret_file = "secret.txt"'), encoding="utf-8"
+        )
+        config = load_config(self.config_path)
+        self.assertEqual(config.checkmk.secret, "geheim")
+
+    def test_defaults_land_under_the_install_root(self):
+        config = load_config(self.write())
+        root = install_root()
+        self.assertEqual(config.state_file, root / "data" / "state.json")
+        self.assertEqual(config.logging.file, root / "logs" / "cmkoffline2mail.log")
+
+    def test_environment_variable_selects_the_config(self):
+        os.environ["CMKOFFLINE2MAIL_CONFIG"] = str(self.write())
+        self.addCleanup(os.environ.pop, "CMKOFFLINE2MAIL_CONFIG", None)
+        self.assertEqual(default_config_path(), self.config_path)
 
 
 class NormalizeFolderTest(unittest.TestCase):
