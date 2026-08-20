@@ -37,7 +37,26 @@ New-Item -ItemType Directory "C:\Program Files\cmkoffline2mail" -Force
 # Inhalt dieses Repositories dorthin kopieren (git clone, Copy-Item oder ZIP entpacken)
 ```
 
-Ergebnis: `C:\Program Files\cmkoffline2mail\cmkoffline2mail\cli.py` muss existieren.
+Danach muss das Verzeichnis so aussehen (der Paketordner traegt denselben Namen wie
+das Wurzelverzeichnis - das ist Absicht, alle Python-Dateien liegen eine Ebene tiefer):
+
+```
+C:\Program Files\cmkoffline2mail\
+├─ cmkoffline2mail\      <- Python-Paket: cli.py, config.py, checkmk.py, ...
+├─ config\               <- Beispielkonfigurationen
+├─ deploy\               <- PowerShell-Skripte
+├─ tests\
+├─ pyproject.toml
+└─ README.md
+```
+
+Schnelltest - beide Befehle muessen ohne Fehler durchlaufen:
+
+```powershell
+Test-Path "C:\Program Files\cmkoffline2mail\cmkoffline2mail\cli.py"   # muss True sein
+cd "C:\Program Files\cmkoffline2mail"
+python -m cmkoffline2mail --version
+```
 
 ### 2.2 Automationsbenutzer in Checkmk anlegen
 
