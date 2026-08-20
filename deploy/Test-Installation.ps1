@@ -159,6 +159,13 @@ if ($task) {
 
     Test-Item "Aufgabe ist aktiviert" { $task.State -ne "Disabled" } "Enable-ScheduledTask -TaskName '$TaskName'"
 
+    # cmd.exe verstuemmelt die Befehlszeile, wenn hinter /c mehr als zwei
+    # Anfuehrungszeichen stehen - dann landen Pfade als lose Argumente beim Programm.
+    $arguments = "$($task.Actions[0].Arguments)"
+    Test-Item "Befehlszeile der Aufgabe ist eindeutig (max. zwei Anfuehrungszeichen)" `
+              { ($arguments.ToCharArray() | Where-Object { $_ -eq '"' }).Count -le 2 } `
+              "Aufgabe neu registrieren:  .\deploy\Install-ScheduledTask.ps1 -GmsaAccount '$taskUser'"
+
     $info = Get-ScheduledTaskInfo -TaskName $TaskName
     $rc = $info.LastTaskResult
     Write-Host ("         Letzter Lauf: {0}, Ergebnis 0x{1:X}" -f $info.LastRunTime, $rc)

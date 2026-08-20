@@ -249,6 +249,18 @@ Fehler, die auftreten, bevor das Programmprotokoll ueberhaupt existiert
 (fehlende venv, falsche Rechte, falscher Pfad). Ohne diesen Umweg verschluckt
 die Aufgabenplanung solche Meldungen vollstaendig.
 
+Die Befehlszeile der Aufgabe lautet bewusst nur:
+
+```
+cmd.exe /c "C:\FIRMA\cmkoffline2mail\deploy\Run-Task.cmd"
+```
+
+**ohne** `--config`. Stehen hinter `/c` mehr als zwei Anfuehrungszeichen,
+entfernt `cmd.exe` das erste und das letzte (siehe `cmd /?`) und zerlegt die
+Zeile falsch - Pfade landen dann als lose Argumente beim Programm
+(`error: unrecognized arguments: ...`). Die Konfiguration wird ohnehin
+automatisch unter `<Basisordner>\config\config.toml` gefunden.
+
 Kontrolle:
 
 ```powershell
@@ -450,6 +462,7 @@ Es gibt bewusst **keine Entwarnungsmail**: gemeldet wird nur das Ausbleiben von 
 | Aufgabe endet mit `2` | `--validate` von Hand ausfuehren, die Meldung nennt den Schluessel |
 | Aufgabe endet mit `9` | Wrapper findet `.venv\Scripts\python.exe` nicht |
 | Aufgabe endet mit `0xC0000135` / Zugriff verweigert | venv wurde aus einem Python im Benutzerprofil erzeugt - `pyvenv.cfg` pruefen (siehe 2.2) |
+| `error: unrecognized arguments: C:\...` | Befehlszeile der Aufgabe enthaelt mehr als zwei Anfuehrungszeichen - Aufgabe mit `Install-ScheduledTask.ps1` neu registrieren |
 | `No module named cmkoffline2mail` | Suchpfad-Eintrag fehlt - `.\deploy\Register-PackagePath.ps1` ausfuehren. Kommt die Meldung danach weiter, liegt das Paket nicht unter dem Basisordner (ZIP-Doppelordner, siehe 2.1) |
 | Es kommen keine Mails mehr | Host wurde bereits gemeldet - `repeat_after` pruefen oder Statusdatei loeschen |
 | Keine Protokolldatei | `logging.file` liegt in einem Pfad ohne Schreibrecht fuer das gMSA |

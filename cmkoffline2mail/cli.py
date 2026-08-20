@@ -114,12 +114,10 @@ def main(argv: list[str] | None = None) -> int:
     for message in config.warnings:
         LOG.warning(message)
 
-    LOG.debug(
-        "cmkoffline2mail %s, Basisordner: %s, Konfiguration: %s",
-        __version__,
-        install_root(),
-        config.source,
-    )
+    # Bewusst INFO: in logs\task-run.log ist sofort erkennbar, welche
+    # Konfiguration ein Lauf tatsaechlich verwendet hat.
+    LOG.info("cmkoffline2mail %s, Konfiguration: %s", __version__, config.source)
+    LOG.debug("Basisordner: %s, Python: %s", install_root(), sys.executable)
 
     template_path = Path(args.template) if args.template else config.mail.template
     try:

@@ -10,7 +10,9 @@ rem Das Skript wechselt selbst in den Basisordner und setzt PYTHONPATH - es
 rem funktioniert daher unabhaengig davon, welches Arbeitsverzeichnis die
 rem Aufgabe mitgibt.
 rem
-rem Parameter werden durchgereicht, z. B.:  Run-Task.cmd --dry-run
+rem Die Aufgabe ruft dieses Skript OHNE Argumente auf - die Konfiguration wird
+rem automatisch unter <Basisordner>\config\config.toml gefunden. Beim Aufruf von
+rem Hand koennen Parameter angehaengt werden, z. B.:  Run-Task.cmd --dry-run
 rem ---------------------------------------------------------------------------
 setlocal
 

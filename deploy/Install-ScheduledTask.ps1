@@ -304,9 +304,14 @@ if (-not (Test-Path -LiteralPath $runner)) {
     throw "Startskript '$runner' fehlt - bitte deploy\Run-Task.cmd mitkopieren."
 }
 
+# Bewusst OHNE weitere Argumente: cmd.exe entfernt bei mehr als zwei
+# Anfuehrungszeichen hinter /c das erste und das letzte (siehe "cmd /?") und
+# zerlegt die Befehlszeile dabei falsch. Mit genau einem in Anfuehrungszeichen
+# gesetzten Pfad ist der Aufruf eindeutig. Die Konfiguration wird ohnehin
+# automatisch unter <Basisordner>\config\config.toml gefunden.
 $action = New-ScheduledTaskAction `
     -Execute $env:ComSpec `
-    -Argument "/c `"$runner`" --config `"$configPath`"" `
+    -Argument "/c `"$runner`"" `
     -WorkingDirectory $InstallDir
 
 $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).Date.AddMinutes(2) `
@@ -335,7 +340,7 @@ $taskLog = Join-Path $logDir "task-run.log"
 
 Write-Host ""
 Write-Host "Fertig. Die Aufgabe startet:" -ForegroundColor Green
-Write-Host "  $env:ComSpec /c `"$runner`" --config `"$configPath`""
+Write-Host "  $env:ComSpec /c `"$runner`""
 Write-Host "  Arbeitsverzeichnis: $InstallDir"
 Write-Host "  Ausgabe der Laeufe: $taskLog"
 Write-Host "  Programmprotokoll : $(Join-Path $logDir 'cmkoffline2mail.log')"
