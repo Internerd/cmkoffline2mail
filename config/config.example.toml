@@ -1,0 +1,123 @@
+# =====================================================================
+# cmkoffline2mail - Hauptkonfiguration
+# Empfohlener Ablageort: C:\ProgramData\cmkoffline2mail\config.toml
+# Rechte: nur SYSTEM, Administratoren und das gMSA-Konto (Lesen)
+# =====================================================================
+
+[checkmk]
+# Site-URL ohne "/check_mk" - z. B. https://cmk.firma.local/produktion
+url      = "https://cmk.firma.local/produktion"
+# Automationsbenutzer aus Checkmk (Setup > Users, "Automation secret")
+username = "automation"
+
+# Das Automationsgeheimnis EINE der folgenden Varianten:
+secret      = "BITTE-ERSETZEN"                                   # a) direkt (Datei-ACL setzen!)
+# secret_env  = "CMK_AUTOMATION_SECRET"                          # b) aus Umgebungsvariable
+# secret_file = "C:/ProgramData/cmkoffline2mail/secret.txt"      # c) aus separater Datei
+
+verify_tls = true            # false nur bei selbstsigniertem Zertifikat ohne CA-Bundle
+# ca_bundle = "C:/ProgramData/cmkoffline2mail/firmen-ca.pem"
+timeout    = 30              # Sekunden pro Anfrage
+retries    = 2               # Wiederholungen bei Netz-/5xx-Fehlern
+# sites    = ["produktion"]  # nur diese Livestatus-Sites abfragen (leer = alle)
+
+# Custom-Attribute der Hosts, die als Mail-Variablen zur Verfuegung stehen sollen.
+# Der Name ist die ID aus Setup > Hosts > Custom host attributes (auch Labels und
+# Host-Tags werden gefunden). Platzhalter heisst dann {{ attr_<name> }},
+# also z. B. {{ attr_standort }} und {{ attr_ansprechpartner }}.
+# Passende Namen findet man mit:  cmkoffline2mail --show-attributes HOSTNAME
+custom_attributes = ["standort", "ansprechpartner"]
+
+# true = auch am Ordner vererbte Attributwerte lesen (empfohlen)
+effective_attributes = true
+
+# Bis zu wie vielen Offline-Hosts einzeln abgefragt wird, statt alle Hosts
+# auf einmal zu laden. 0 = immer die komplette Hostliste laden.
+folder_lookup_threshold = 50
+
+
+[behaviour]
+group_by                    = "host"    # "host" = eine Mail je Host (Standard),
+                                        # "folder" = eine Sammelmail je Ordner,
+                                        # "single" = eine Mail fuer alle Hosts
+include_unreachable         = true      # UNREACHABLE wie DOWN behandeln
+skip_in_downtime            = true      # Hosts in geplanter Wartung ignorieren
+skip_acknowledged           = false     # quittierte Stoerungen ignorieren
+skip_notifications_disabled = true      # Hosts mit abgeschalteten Benachrichtigungen ignorieren
+skip_pending                = true      # noch nie geprueft (pending) ignorieren
+repeat_after                = "24h"     # Erinnerung, solange der Host offline bleibt ("off" = nur einmal)
+max_hosts_per_mail          = 0         # >0 teilt grosse Listen auf mehrere Mails auf
+datetime_format             = "%d.%m.%Y %H:%M"
+offline_since_source        = "auto"    # auto | last_time_up | last_state_change
+
+
+# ---------------------------------------------------------------------
+# Ordner: je Checkmk-Ordner die Zeitspanne, ab der benachrichtigt wird.
+# Pfade wie in Checkmk (Setup > Hosts), Auflistung mit --list-folders.
+# Passt mehr als eine Regel, gewinnt die laengste (genaueste) Angabe.
+# ---------------------------------------------------------------------
+[[folders]]
+path               = "/produktion"
+offline_for        = "30m"          # s, m/min, h, d, w - auch "1d12h"
+include_subfolders = true
+
+[[folders]]
+path               = "/produktion/aussenstellen"
+offline_for        = "4h"           # gilt vorrangig vor /produktion
+recipients         = ["aussendienst@firma.de"]   # optional abweichende Empfaenger
+subject            = "[Checkmk] Aussenstelle {{ attr_standort }}: {{ host }} offline"
+repeat_after       = "12h"          # optional abweichende Erinnerung
+
+[[folders]]
+path               = "/test"
+offline_for        = "7d"
+enabled            = false          # Regel voruebergehend abschalten
+
+
+[mail]
+from      = "checkmk@firma.de"
+from_name = "Checkmk Monitoring"
+to        = ["it-team@firma.de"]
+# cc      = []
+# bcc     = []
+# reply_to = "servicedesk@firma.de"
+
+# Betreff mit Platzhaltern - siehe mailtemplate.example.toml fuer die Liste.
+# Bei group_by = "host" beziehen sich {{ host }}, {{ ip }} und {{ attr_* }}
+# direkt auf den betroffenen Host.
+subject = "[Checkmk] {{ host }} ({{ ip }}) seit {{ offline_for }} offline - {{ attr_standort }}"
+
+# Zweite Konfigurationsdatei mit dem Mailinhalt (relativ zu dieser Datei erlaubt)
+template = "mailtemplate.toml"
+
+
+[smtp]
+host     = "smtp.firma.de"
+port     = 587
+security = "starttls"        # none | starttls | ssl
+
+# Nur ausfuellen, wenn der Relay eine Anmeldung verlangt. Bei einem internen
+# Relay, der die IP des Servers freigibt, username/password leer lassen.
+# username     = "checkmk@firma.de"
+# password     = "geheim"
+# password_env = "CMK_SMTP_PASSWORD"
+# password_file = "C:/ProgramData/cmkoffline2mail/smtp.txt"
+
+timeout    = 30
+verify_tls = true
+# ca_bundle = "C:/ProgramData/cmkoffline2mail/firmen-ca.pem"
+# helo_name = "srv-monitor.firma.local"
+
+
+[state]
+# Merkt sich, wer schon benachrichtigt wurde (verhindert Mails bei jedem Lauf).
+# Das gMSA-Konto braucht hier Schreibrechte.
+file = "C:/ProgramData/cmkoffline2mail/state.json"
+
+
+[logging]
+level        = "INFO"        # DEBUG | INFO | WARNING | ERROR
+file         = "C:/ProgramData/cmkoffline2mail/cmkoffline2mail.log"
+max_bytes    = 5242880       # 5 MB je Datei
+backup_count = 5
+console      = true          # Ausgabe zusaetzlich nach stdout (Aufgabenplanung)

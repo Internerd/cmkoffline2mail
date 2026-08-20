@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cmkoffline2mail"
+version = "1.0.0"
+description = "Benachrichtigt per SMTP, wenn Hosts in bestimmten Checkmk-Ordnern zu lange offline sind"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+cmkoffline2mail = "cmkoffline2mail.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["cmkoffline2mail*"]
+
+[tool.setuptools.package-data]
+cmkoffline2mail = ["py.typed"]

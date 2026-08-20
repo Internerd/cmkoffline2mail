@@ -1,0 +1,141 @@
+import os
+import tempfile
+import unittest
+from pathlib import Path
+
+from cmkoffline2mail.config import ConfigError, load_config, normalize_folder
+
+MINIMAL = """
+[checkmk]
+url = "https://cmk.example.com/site1"
+username = "automation"
+secret = "s3cr3t"
+
+[[folders]]
+path = "/produktion"
+offline_for = "30m"
+
+[mail]
+from = "checkmk@example.com"
+to = ["it@example.com"]
+
+[smtp]
+host = "smtp.example.com"
+"""
+
+
+class ConfigTestCase(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.dir = Path(self.tmp.name)
+
+    def write(self, text: str, name: str = "config.toml") -> Path:
+        path = self.dir / name
+        path.write_text(text, encoding="utf-8")
+        return path
+
+    def test_minimal_config(self):
+        config = load_config(self.write(MINIMAL))
+        self.assertEqual(config.checkmk.api_url, "https://cmk.example.com/site1/check_mk/api/1.0")
+        self.assertEqual(config.checkmk.gui_url, "https://cmk.example.com/site1/check_mk")
+        self.assertEqual(config.checkmk.site, "site1")
+        self.assertEqual(config.behaviour.group_by, "host")
+        self.assertEqual(config.folders[0].offline_for, 1800)
+        self.assertEqual(config.mail.recipients, ["it@example.com"])
+        self.assertEqual(config.smtp.port, 25)
+        self.assertEqual(config.mail.template, self.dir / "mailtemplate.toml")
+
+    def test_api_url_variants(self):
+        for url, expected in [
+            ("https://cmk/site1/", "https://cmk/site1/check_mk/api/1.0"),
+            ("https://cmk/site1/check_mk", "https://cmk/site1/check_mk/api/1.0"),
+            ("https://cmk/site1/check_mk/api/1.0", "https://cmk/site1/check_mk/api/1.0"),
+        ]:
+            config = load_config(self.write(MINIMAL.replace("https://cmk.example.com/site1", url)))
+            self.assertEqual(config.checkmk.api_url, expected)
+
+    def test_smtp_default_port_follows_security(self):
+        config = load_config(self.write(MINIMAL + '\nsecurity = "starttls"\n'))
+        self.assertEqual(config.smtp.port, 587)
+        config = load_config(self.write(MINIMAL + '\nsecurity = "ssl"\n'))
+        self.assertEqual(config.smtp.port, 465)
+
+    def test_secret_from_env_and_file(self):
+        os.environ["TEST_CMK_SECRET"] = "aus-env"
+        self.addCleanup(os.environ.pop, "TEST_CMK_SECRET", None)
+        config = load_config(
+            self.write(MINIMAL.replace('secret = "s3cr3t"', 'secret_env = "TEST_CMK_SECRET"'))
+        )
+        self.assertEqual(config.checkmk.secret, "aus-env")
+
+        secret_file = self.dir / "secret.txt"
+        secret_file.write_text("aus-datei\n", encoding="utf-8")
+        config = load_config(
+            self.write(MINIMAL.replace('secret = "s3cr3t"', f'secret_file = "{secret_file}"'))
+        )
+        self.assertEqual(config.checkmk.secret, "aus-datei")
+
+    def test_rule_for_prefers_most_specific(self):
+        text = MINIMAL + """
+[[folders]]
+path = "/produktion/aussenstellen"
+offline_for = "4h"
+
+[[folders]]
+path = "/archiv"
+offline_for = "7d"
+include_subfolders = false
+"""
+        config = load_config(self.write(text))
+        self.assertEqual(config.rule_for("/produktion/webserver").offline_for, 1800)
+        self.assertEqual(config.rule_for("/produktion/aussenstellen/nord").offline_for, 14400)
+        self.assertEqual(config.rule_for("/archiv").offline_for, 604800)
+        self.assertIsNone(config.rule_for("/archiv/2019"))
+        self.assertIsNone(config.rule_for("/sonstiges"))
+
+    def test_folder_matching_is_case_insensitive_and_tolerant(self):
+        config = load_config(self.write(MINIMAL))
+        for variant in ("/Produktion", "produktion", "~produktion", "/produktion/"):
+            self.assertIsNotNone(config.rule_for(variant), variant)
+
+    def test_unknown_keys_are_reported_as_warning(self):
+        config = load_config(self.write(MINIMAL + '\n[behaviour]\ntippfehler = true\n'))
+        self.assertTrue(any("tippfehler" in warning for warning in config.warnings))
+
+    def test_errors(self):
+        cases = {
+            "missing folder": MINIMAL.replace('[[folders]]\npath = "/produktion"\noffline_for = "30m"\n', ""),
+            "bad duration": MINIMAL.replace('"30m"', '"zwei Stunden"'),
+            "zero duration": MINIMAL.replace('"30m"', '"0"'),
+            "no recipient": MINIMAL.replace('to = ["it@example.com"]', "to = []"),
+            "bad url": MINIMAL.replace("https://cmk.example.com/site1", "cmk.example.com"),
+            "no secret": MINIMAL.replace('secret = "s3cr3t"', ""),
+            "duplicate folder": MINIMAL + '\n[[folders]]\npath = "/Produktion"\noffline_for = "1h"\n',
+            "user without password": MINIMAL + '\nusername = "mailer"\n',
+            "all folders disabled": MINIMAL.replace('offline_for = "30m"', 'offline_for = "30m"\nenabled = false'),
+        }
+        for name, text in cases.items():
+            with self.subTest(name):
+                with self.assertRaises(ConfigError):
+                    load_config(self.write(text, f"{abs(hash(name))}.toml"))
+
+    def test_missing_file(self):
+        with self.assertRaises(ConfigError):
+            load_config(self.dir / "gibtsnicht.toml")
+
+    def test_broken_toml(self):
+        with self.assertRaises(ConfigError):
+            load_config(self.write("[checkmk\nurl ="))
+
+
+class NormalizeFolderTest(unittest.TestCase):
+    def test_variants(self):
+        self.assertEqual(normalize_folder("~produktion~nord"), "/produktion/nord")
+        self.assertEqual(normalize_folder("produktion//nord/"), "/produktion/nord")
+        self.assertEqual(normalize_folder("\\produktion\\nord"), "/produktion/nord")
+        self.assertEqual(normalize_folder("/"), "/")
+
+
+if __name__ == "__main__":
+    unittest.main()

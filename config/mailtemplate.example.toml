@@ -1,0 +1,88 @@
+# =====================================================================
+# cmkoffline2mail - Mail-Vorlage (zweite Konfigurationsdatei)
+# Empfohlener Ablageort: C:\ProgramData\cmkoffline2mail\mailtemplate.toml
+# =====================================================================
+#
+# format = "text"  -> nur Textmail
+# format = "html"  -> nur HTML-Mail
+# format = "both"  -> beides (multipart/alternative, empfohlen)
+format = "both"
+#
+# ---------------------------------------------------------------------
+# Platzhalter-Schreibweise: {{ name }}
+#
+# In [text].body / [html].body und im Betreff (mail.subject):
+#   {{ folder }}        Ordnername der Regel        {{ folder_path }}   Ordnerpfad
+#   {{ host_count }}    Anzahl der Hosts            {{ hosts }}         alle Hostnamen
+#   {{ host }}          erster Hostname             {{ ip }}            IP des ersten Hosts
+#   {{ addresses }}     alle IP-Adressen            {{ alias }}         Alias des ersten Hosts
+#   {{ threshold }}     konfigurierte Wartezeit     {{ state }}         DOWN / UNREACHABLE
+#   {{ offline_since }} Offline-Zeitpunkt           {{ offline_for }}   Dauer
+#   {{ now }} {{ date }} {{ time }}                 {{ site }}          Checkmk-Site
+#   {{ checkmk_url }}   Link zur Oberflaeche        {{ url }}           Link zum ersten Host
+#   {{ host_rows }}     die zusammengesetzten Hostzeilen (Pflicht im body)
+#   {{ attr_<name> }}   Custom-Attribute aus checkmk.custom_attributes,
+#                       z. B. {{ attr_standort }} - bei mehreren Hosts
+#                       kommagetrennt und ohne Wiederholungen
+#
+# In [text].host_row / [html].host_row (je Host):
+#   {{ host }} {{ ip }} {{ alias }} {{ state }} {{ folder }} {{ url }}
+#   {{ offline_since }} {{ offline_for }} {{ offline_seconds }} {{ threshold }}
+#   {{ last_check }} {{ output }} {{ attr_<name> }}
+#
+# HTML-Werte werden automatisch maskiert; ein unbekannter Platzhalter
+# fuehrt zu einem Fehler (Test mit: cmkoffline2mail --validate).
+# ---------------------------------------------------------------------
+
+[text]
+body = """
+Hallo,
+
+im Bereich {{ folder }} ist die Erreichbarkeit gestoert
+(Meldeschwelle: {{ threshold }}):
+
+{{ host_rows }}
+Stand: {{ now }}
+Checkmk: {{ checkmk_url }}
+
+Diese Nachricht wurde automatisch erzeugt.
+"""
+
+host_row = """- {{ host }} ({{ ip }}) - {{ state }} seit {{ offline_since }} ({{ offline_for }})
+  Standort: {{ attr_standort }} | Ansprechpartner: {{ attr_ansprechpartner }}
+  Meldung: {{ output }}
+"""
+
+[html]
+body = """
+<html>
+  <body style="font-family:Segoe UI,Arial,sans-serif;font-size:14px;color:#222222;">
+    <p>Hallo,</p>
+    <p>im Bereich <b>{{ folder }}</b> ist die Erreichbarkeit gestoert
+       (Meldeschwelle: <b>{{ threshold }}</b>):</p>
+    <table cellpadding="6" cellspacing="0"
+           style="border-collapse:collapse;border:1px solid #cccccc;">
+      <tr style="background:#f2f2f2;text-align:left;">
+        <th>Host</th><th>IP</th><th>Standort</th><th>Ansprechpartner</th>
+        <th>Status</th><th>Offline seit</th><th>Dauer</th>
+      </tr>
+      {{ host_rows }}
+    </table>
+    <p style="color:#666666;font-size:12px;">
+      Stand: {{ now }} &middot; <a href="{{ checkmk_url }}">Checkmk oeffnen</a><br>
+      Diese Nachricht wurde automatisch erzeugt.
+    </p>
+  </body>
+</html>
+"""
+
+host_row = """<tr>
+        <td><a href="{{ url }}">{{ host }}</a></td>
+        <td>{{ ip }}</td>
+        <td>{{ attr_standort }}</td>
+        <td>{{ attr_ansprechpartner }}</td>
+        <td style="color:#c00000;"><b>{{ state }}</b></td>
+        <td>{{ offline_since }}</td>
+        <td>{{ offline_for }}</td>
+      </tr>
+"""
