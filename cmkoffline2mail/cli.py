@@ -173,6 +173,8 @@ def _validate(config: AppConfig, template: MailTemplate) -> int:
                 for name in config.checkmk.custom_attributes
             ),
         )
+    for entry in config.filters:
+        LOG.info("Filter (alle Ordner): %s", entry.describe())
     for rule in config.folders:
         status = "" if rule.enabled else " [deaktiviert]"
         LOG.info(
@@ -182,6 +184,8 @@ def _validate(config: AppConfig, template: MailTemplate) -> int:
             " inkl. Unterordner" if rule.include_subfolders else "",
             status,
         )
+        for entry in rule.filters:
+            LOG.info("    Filter: %s", entry.describe())
 
     # Vorlage mit Beispieldaten durchspielen, damit Tippfehler sofort auffallen.
     group = _demo_group(config)

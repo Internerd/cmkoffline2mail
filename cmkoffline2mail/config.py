@@ -6,7 +6,7 @@ import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable, Sequence
+from typing import Any, Iterable, Mapping, Sequence
 
 from .duration import DurationError, parse_duration
 
@@ -257,6 +257,69 @@ class CheckmkConfig:
 
 
 @dataclass
+class AttributeFilter:
+    """Benachrichtigt nur (oder gerade nicht), wenn ein Custom-Attribut passt."""
+
+    attribute: str
+    equals: list[str] = field(default_factory=list)
+    contains: list[str] = field(default_factory=list)
+    regex: str = ""
+    not_empty: bool = False
+    mode: str = "include"          # include = nur bei Treffer, exclude = nicht bei Treffer
+    ignore_case: bool = True
+    on_missing: str = ""           # "" = automatisch (include -> skip, exclude -> notify)
+    source: str = "attribute_filters"
+
+    def __post_init__(self) -> None:
+        self._pattern = None
+        if self.regex:
+            try:
+                self._pattern = re.compile(self.regex, re.IGNORECASE if self.ignore_case else 0)
+            except re.error as exc:
+                raise ConfigError(f"'{self.source}.regex' ist kein gueltiger regulaerer Ausdruck: {exc}") from exc
+
+    @property
+    def criteria(self) -> str:
+        """Kurzbeschreibung fuer Protokoll und --validate."""
+        parts: list[str] = []
+        if self.equals:
+            parts.append("ist " + " oder ".join(f"'{value}'" for value in self.equals))
+        if self.contains:
+            parts.append("enthaelt " + " oder ".join(f"'{value}'" for value in self.contains))
+        if self.regex:
+            parts.append(f"passt auf /{self.regex}/")
+        if self.not_empty:
+            parts.append("ist gesetzt")
+        return " oder ".join(parts) if parts else "(keine Bedingung)"
+
+    def _value_matches(self, value: str) -> bool:
+        haystack = value.lower() if self.ignore_case else value
+
+        for expected in self.equals:
+            if haystack == (expected.lower() if self.ignore_case else expected):
+                return True
+        for part in self.contains:
+            if (part.lower() if self.ignore_case else part) in haystack:
+                return True
+        if self._pattern is not None and self._pattern.search(value):
+            return True
+        return bool(self.not_empty)
+
+    def accepts(self, attributes: Mapping[str, str]) -> bool:
+        """True = der Host darf gemeldet werden."""
+        value = (attributes.get(self.attribute) or "").strip()
+        if not value:
+            fallback = self.on_missing or ("skip" if self.mode == "include" else "notify")
+            return fallback == "notify"
+        matched = self._value_matches(value)
+        return matched if self.mode == "include" else not matched
+
+    def describe(self) -> str:
+        wording = "nur wenn" if self.mode == "include" else "nicht wenn"
+        return f"{wording} {self.attribute} {self.criteria}"
+
+
+@dataclass
 class FolderRule:
     path: str
     offline_for: int
@@ -266,6 +329,7 @@ class FolderRule:
     repeat_after: int | None = None
     enabled: bool = True
     label: str = ""
+    filters: list[AttributeFilter] = field(default_factory=list)
 
     @property
     def title(self) -> str:
@@ -344,6 +408,7 @@ class AppConfig:
     logging: LoggingConfig
     state_file: Path
     source: Path
+    filters: list[AttributeFilter] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 
     def rule_for(self, host_folder: str) -> FolderRule | None:
@@ -388,8 +453,19 @@ def load_config(path: str | os.PathLike[str]) -> AppConfig:
     state_section.warn_unknown()
 
     folders = _parse_folders(data.get("folders"), behaviour, warnings)
+    filters = _parse_attribute_filters(data.get("attribute_filters"), "attribute_filters", warnings)
 
-    root.warn_unknown({"folders"})
+    root.warn_unknown({"folders", "attribute_filters"})
+
+    # Gefiltert werden kann nur, was auch ausgelesen wird: fehlende Attribute
+    # automatisch ergaenzen, sonst waere der Wert immer leer.
+    for entry in [*filters, *(f for rule in folders for f in rule.filters)]:
+        if entry.attribute not in checkmk.custom_attributes:
+            checkmk.custom_attributes.append(entry.attribute)
+            warnings.append(
+                f"Attribut '{entry.attribute}' aus '{entry.source}' wurde automatisch zu "
+                f"'checkmk.custom_attributes' ergaenzt"
+            )
 
     # Dienstkonten haben im Basisordner ueblicherweise nur Leserechte.
     base = install_root()
@@ -413,6 +489,7 @@ def load_config(path: str | os.PathLike[str]) -> AppConfig:
         logging=log_cfg,
         state_file=state_file,
         source=config_path,
+        filters=filters,
         warnings=warnings,
     )
 
@@ -532,6 +609,37 @@ def _parse_logging(section: _Section) -> LoggingConfig:
     return config
 
 
+def _parse_attribute_filters(raw: Any, label: str, warnings: list[str]) -> list[AttributeFilter]:
+    """Liest [[attribute_filters]] bzw. [[folders.attribute_filters]]."""
+    if raw is None:
+        return []
+    if not isinstance(raw, list) or not all(isinstance(item, dict) for item in raw):
+        raise ConfigError(f"'{label}' muss aus [[{label}]]-Abschnitten bestehen")
+
+    filters: list[AttributeFilter] = []
+    for index, item in enumerate(raw, start=1):
+        where = f"{label}[{index}]"
+        section = _Section(item, where, warnings)
+        entry = AttributeFilter(
+            attribute=section.str("attribute", required=True),
+            equals=section.str_list("equals"),
+            contains=section.str_list("contains"),
+            regex=section.str("regex"),
+            not_empty=section.bool("not_empty", False),
+            mode=section.choice("mode", ("include", "exclude"), "include"),
+            ignore_case=section.bool("ignore_case", True),
+            on_missing=section.choice("on_missing", ("", "skip", "notify"), ""),
+            source=where,
+        )
+        if not (entry.equals or entry.contains or entry.regex or entry.not_empty):
+            raise ConfigError(
+                f"'{where}' braucht mindestens eine Bedingung: equals, contains, regex oder not_empty"
+            )
+        section.warn_unknown()
+        filters.append(entry)
+    return filters
+
+
 def _parse_folders(raw: Any, behaviour: BehaviourConfig, warnings: list[str]) -> list[FolderRule]:
     if raw is None:
         raise ConfigError("Es ist kein Ordner konfiguriert - mindestens ein [[folders]]-Abschnitt wird benoetigt")
@@ -559,10 +667,13 @@ def _parse_folders(raw: Any, behaviour: BehaviourConfig, warnings: list[str]) ->
             repeat_after=section.duration("repeat_after") if repeat_raw else None,
             enabled=section.bool("enabled", True),
             label=section.str("label"),
+            filters=_parse_attribute_filters(
+                item.get("attribute_filters"), f"folders[{index}].attribute_filters", warnings
+            ),
         )
         if rule.offline_for <= 0:
             raise ConfigError(f"'folders[{index}].offline_for' muss groesser als 0 sein")
-        section.warn_unknown()
+        section.warn_unknown({"attribute_filters"})
         rules.append(rule)
 
     if not any(rule.enabled for rule in rules):

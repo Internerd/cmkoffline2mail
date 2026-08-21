@@ -89,6 +89,52 @@ offline_for        = "7d"
 enabled            = false          # Regel voruebergehend abschalten
 
 
+# ---------------------------------------------------------------------
+# Filter: nur benachrichtigen, wenn ein Custom-Attribut passt.
+#
+# Ohne [[attribute_filters]] wird jeder Host des Ordners gemeldet. Sind
+# mehrere Filter angegeben, muessen ALLE zutreffen. Das Attribut wird
+# automatisch mit ausgelesen, es muss nicht zusaetzlich unter
+# checkmk.custom_attributes stehen.
+#
+# Bedingungen (mindestens eine, mehrere wirken als ODER):
+#   equals    = ["Werk Nord"]     Wert ist genau einer davon
+#   contains  = ["Nord"]          Wert enthaelt eine dieser Zeichenketten
+#   regex     = "^Werk [0-9]+$"   Wert passt auf den regulaeren Ausdruck
+#   not_empty = true              Wert ist ueberhaupt gesetzt
+#
+# Weitere Schalter:
+#   mode        = "include"  nur bei Treffer melden (Standard)
+#               = "exclude"  gerade dann NICHT melden
+#   ignore_case = true       Gross-/Kleinschreibung egal (Standard)
+#   on_missing  = "skip"     Attribut leer/nicht gesetzt -> nicht melden
+#               = "notify"   Attribut leer -> trotzdem melden
+#               (ohne Angabe: include -> skip, exclude -> notify)
+# ---------------------------------------------------------------------
+
+# Beispiel: nur Hosts melden, deren Attribut "ueberwachung" auf "24x7" steht
+# [[attribute_filters]]
+# attribute = "ueberwachung"
+# equals    = ["24x7", "rund um die Uhr"]
+
+# Beispiel: Testsysteme grundsaetzlich nicht melden
+# [[attribute_filters]]
+# attribute = "umgebung"
+# contains  = ["Test", "Labor"]
+# mode      = "exclude"
+
+# Filter koennen auch nur fuer einen Ordner gelten - dann direkt unter
+# den passenden [[folders]]-Abschnitt schreiben:
+#
+# [[folders]]
+# path        = "/produktion"
+# offline_for = "30m"
+#
+#   [[folders.attribute_filters]]
+#   attribute = "kritisch"
+#   equals    = ["ja"]
+
+
 [mail]
 from      = "checkmk@firma.de"
 from_name = "Checkmk Monitoring"

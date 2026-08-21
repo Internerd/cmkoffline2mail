@@ -194,6 +194,85 @@ class PathResolutionTest(unittest.TestCase):
         self.assertEqual(default_config_path(), self.config_path)
 
 
+class AttributeFilterConfigTest(unittest.TestCase):
+    """[[attribute_filters]] global und je Ordner."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.dir = Path(self.tmp.name)
+
+    def write(self, extra: str, name: str = "config.toml") -> Path:
+        path = self.dir / name
+        path.write_text(MINIMAL + extra, encoding="utf-8")
+        return path
+
+    def test_global_filter(self):
+        config = load_config(self.write(
+            '\n[[attribute_filters]]\nattribute = "standort"\nequals    = ["Werk Nord", "Werk Sued"]\n'
+        ))
+        self.assertEqual(len(config.filters), 1)
+        entry = config.filters[0]
+        self.assertEqual(entry.attribute, "standort")
+        self.assertEqual(entry.mode, "include")
+        self.assertTrue(entry.ignore_case)
+        self.assertTrue(entry.accepts({"standort": "werk nord"}))
+        self.assertFalse(entry.accepts({"standort": "Werk Ost"}))
+        self.assertFalse(entry.accepts({}))
+
+    def test_filter_attribute_is_added_to_custom_attributes(self):
+        config = load_config(self.write(
+            '\n[[attribute_filters]]\nattribute = "wartungsfenster"\nnot_empty = true\n'
+        ))
+        self.assertIn("wartungsfenster", config.checkmk.custom_attributes)
+        self.assertTrue(any("wartungsfenster" in warning for warning in config.warnings))
+
+    def test_folder_filter(self):
+        config = load_config(self.write(
+            '\n[[folders.attribute_filters]]\nattribute = "kritisch"\nequals    = ["ja"]\n'
+        ))
+        self.assertEqual(len(config.folders[0].filters), 1)
+        self.assertEqual(config.folders[0].filters[0].attribute, "kritisch")
+
+    def test_exclude_mode_and_description(self):
+        config = load_config(self.write(
+            '\n[[attribute_filters]]\nattribute = "umgebung"\ncontains  = ["Test"]\nmode      = "exclude"\n'
+        ))
+        entry = config.filters[0]
+        self.assertEqual(entry.mode, "exclude")
+        self.assertIn("nicht wenn", entry.describe())
+        self.assertFalse(entry.accepts({"umgebung": "Testsystem"}))
+        self.assertTrue(entry.accepts({"umgebung": "Produktion"}))
+        self.assertTrue(entry.accepts({}))
+
+    def test_regex_filter(self):
+        config = load_config(self.write(
+            '\n[[attribute_filters]]\nattribute = "standort"\nregex     = "^Werk [0-9]+$"\n'
+        ))
+        entry = config.filters[0]
+        self.assertTrue(entry.accepts({"standort": "Werk 12"}))
+        self.assertFalse(entry.accepts({"standort": "Werk Nord"}))
+
+    def test_errors(self):
+        cases = {
+            "no condition": '\n[[attribute_filters]]\nattribute = "standort"\n',
+            "no attribute": '\n[[attribute_filters]]\nequals = ["x"]\n',
+            "bad mode": '\n[[attribute_filters]]\nattribute = "a"\nequals = ["x"]\nmode = "vielleicht"\n',
+            "bad regex": '\n[[attribute_filters]]\nattribute = "a"\nregex = "([unvollstaendig"\n',
+            "bad on_missing": '\n[[attribute_filters]]\nattribute = "a"\nequals = ["x"]\non_missing = "egal"\n',
+        }
+        for name, extra in cases.items():
+            with self.subTest(name):
+                with self.assertRaises(ConfigError):
+                    load_config(self.write(extra, f"{abs(hash(name))}.toml"))
+
+    def test_unknown_key_is_warned(self):
+        config = load_config(self.write(
+            '\n[[attribute_filters]]\nattribute = "standort"\nequals = ["Nord"]\ntippfehler = true\n'
+        ))
+        self.assertTrue(any("tippfehler" in warning for warning in config.warnings))
+
+
 class TomlErrorTest(unittest.TestCase):
     """Die Fehlermeldung soll die betroffene Zeile zeigen."""
 

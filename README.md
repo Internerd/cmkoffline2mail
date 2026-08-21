@@ -6,6 +6,7 @@ Gedacht fuer den unbeaufsichtigten Betrieb auf einem **Windows Server** in der
 **Aufgabenplanung unter einem gMSA-Konto**.
 
 * Pro Ordner eine eigene Zeitspanne (z. B. Produktion 30 Min., Aussenstellen 4 Std.)
+* Filter auf Custom-Attribute: nur melden, wenn z. B. `ueberwachung = 24x7` gesetzt ist
 * **Eine Mail je Host** (alternativ eine Sammelmail je Ordner oder eine Gesamtmail)
 * Hostname, IP-Adresse und beliebige **Custom-Attribute** als Variablen in Betreff und Mailtext
 * Zwei Konfigurationsdateien: Steuerung (`config.toml`) und Mailinhalt (`mailtemplate.toml`)
@@ -333,6 +334,56 @@ Passt mehr als eine Regel auf einen Host, **gewinnt die genaueste (laengste) Pfa
 Ordner ohne Regel werden nicht gemeldet. Gross-/Kleinschreibung ist egal, `~` und `/`
 sind gleichwertig.
 
+### `[[attribute_filters]]` - nur bei bestimmtem Attributinhalt melden
+
+Ohne Filter wird jeder Host der konfigurierten Ordner gemeldet. Mit Filtern wird
+nur benachrichtigt, wenn ein Custom-Attribut den erwarteten Inhalt hat:
+
+```toml
+# Nur Hosts mit Attribut "ueberwachung" = 24x7 melden
+[[attribute_filters]]
+attribute = "ueberwachung"
+equals    = ["24x7", "rund um die Uhr"]
+
+# Testsysteme grundsaetzlich nicht melden
+[[attribute_filters]]
+attribute = "umgebung"
+contains  = ["Test", "Labor"]
+mode      = "exclude"
+```
+
+| Schluessel | Bedeutung |
+|---|---|
+| `attribute` | Name des Custom-Attributs, Labels oder Host-Tags (Pflicht) |
+| `equals` | Wert ist genau einer aus der Liste |
+| `contains` | Wert enthaelt eine der Zeichenketten |
+| `regex` | Wert passt auf den regulaeren Ausdruck |
+| `not_empty` | Wert ist ueberhaupt gesetzt |
+| `mode` | `include` = nur bei Treffer melden (Standard), `exclude` = dann nicht melden |
+| `ignore_case` | Gross-/Kleinschreibung ignorieren (Standard `true`) |
+| `on_missing` | Attribut leer: `skip` oder `notify` (Standard: `include` → `skip`, `exclude` → `notify`) |
+
+* Mindestens eine Bedingung ist noetig; mehrere Bedingungen in **einem** Filter
+  wirken als ODER.
+* Mehrere `[[attribute_filters]]` wirken als UND - es muessen alle zutreffen.
+* Das Attribut wird automatisch mit ausgelesen, es muss nicht zusaetzlich unter
+  `checkmk.custom_attributes` stehen.
+* Filter gelten fuer alle Ordner. Sollen sie nur fuer einen Ordner gelten, direkt
+  unter dessen `[[folders]]`-Abschnitt schreiben:
+
+```toml
+[[folders]]
+path        = "/produktion"
+offline_for = "30m"
+
+  [[folders.attribute_filters]]
+  attribute = "kritisch"
+  equals    = ["ja"]
+```
+
+`--validate` listet alle aktiven Filter im Klartext auf, `--log-level DEBUG`
+protokolliert je uebersprungenem Host den Grund samt gefundenem Wert.
+
 ### `[mail]`, `[smtp]`, `[state]`, `[logging]`
 
 `mail.from`, `mail.to`, `mail.subject` (mit Platzhaltern) und `mail.template`
@@ -438,6 +489,8 @@ run.cmd [Optionen]                          # nutzt die venv aus dem Basisordner
    `[behaviour]` uebersprungen.
 3. Ueber den Setup-Ordner wird die passendste `[[folders]]`-Regel gesucht;
    Hosts in nicht konfigurierten Ordnern werden ignoriert.
+3a. Konfigurierte `[[attribute_filters]]` muessen zutreffen - sonst wird der Host
+   uebersprungen.
 4. Ist der Host laenger offline als `offline_for`, wird eine Mail faellig.
 5. Die Statusdatei verhindert, dass dieselbe Stoerung erneut gemeldet wird.
    Erst nach `repeat_after` folgt eine Erinnerung; ist der Host wieder online,

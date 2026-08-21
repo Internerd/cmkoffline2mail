@@ -152,6 +152,21 @@ def evaluate(
             result.note_skip("Ordner nicht konfiguriert")
             continue
 
+        # Attributfilter: globale zuerst, danach die des Ordners. Alle muessen zutreffen.
+        blocking = next(
+            (entry for entry in (*config.filters, *rule.filters) if not entry.accepts(host.attributes)),
+            None,
+        )
+        if blocking is not None:
+            LOG.debug(
+                "Host '%s' wird durch Attributfilter uebersprungen (%s, Wert: '%s')",
+                host.name,
+                blocking.describe(),
+                host.attributes.get(blocking.attribute, ""),
+            )
+            result.note_skip(f"Attributfilter ({blocking.describe()})")
+            continue
+
         offline_since = _offline_since(host, config.behaviour.offline_since_source)
         if offline_since <= 0:
             LOG.warning(

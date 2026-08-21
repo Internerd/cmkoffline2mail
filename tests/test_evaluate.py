@@ -5,6 +5,7 @@ from pathlib import Path
 from cmkoffline2mail.checkmk import HostConfigInfo, MonitoredHost
 from cmkoffline2mail.config import (
     AppConfig,
+    AttributeFilter,
     BehaviourConfig,
     CheckmkConfig,
     FolderRule,
@@ -24,7 +25,7 @@ from cmkoffline2mail.state import NotificationState
 NOW = 1_700_000_000
 
 
-def make_config(**behaviour):
+def make_config(filters=(), folder_filters=(), **behaviour):
     return AppConfig(
         checkmk=CheckmkConfig(
             url="https://cmk.example.com/site1",
@@ -35,9 +36,10 @@ def make_config(**behaviour):
         ),
         behaviour=BehaviourConfig(**behaviour),
         folders=[
-            FolderRule(path="/produktion", offline_for=1800),
+            FolderRule(path="/produktion", offline_for=1800, filters=list(folder_filters)),
             FolderRule(path="/produktion/aussenstellen", offline_for=14400, recipients=["aussen@x.de"]),
         ],
+        filters=list(filters),
         mail=MailConfig(sender="cmk@x.de", recipients=["it@x.de"]),
         smtp=SmtpConfig(host="smtp"),
         logging=LoggingConfig(),
@@ -143,6 +145,89 @@ class EvaluateTest(unittest.TestCase):
     def test_sorted_by_duration(self):
         hosts = [make_host("kurz", offline=3600), make_host("lang", offline=99999)]
         self.assertEqual([entry.name for entry in self.evaluate(hosts).due], ["lang", "kurz"])
+
+
+class AttributeFilterTest(unittest.TestCase):
+    """Nur melden, wenn ein Custom-Attribut den erwarteten Inhalt hat."""
+
+    def setUp(self):
+        self.state, tmp = fresh_state()
+        self.addCleanup(tmp.cleanup)
+
+    def due(self, config, hosts):
+        state, tmp = fresh_state()
+        self.addCleanup(tmp.cleanup)
+        return [entry.name for entry in evaluate(hosts, config, state, NOW).due]
+
+    def hosts(self):
+        nord = make_host("srv-nord")
+        sued = make_host("srv-sued")
+        sued.attributes = {"standort": "Werk Sued"}
+        ohne = make_host("srv-ohne")
+        ohne.attributes = {"standort": ""}
+        return [nord, sued, ohne]
+
+    def test_equals_include(self):
+        config = make_config(filters=[AttributeFilter(attribute="standort", equals=["Nord"])])
+        self.assertEqual(self.due(config, self.hosts()), ["srv-nord"])
+
+    def test_contains_is_case_insensitive_by_default(self):
+        config = make_config(filters=[AttributeFilter(attribute="standort", contains=["nord"])])
+        self.assertEqual(self.due(config, self.hosts()), ["srv-nord"])
+
+    def test_case_sensitive_when_requested(self):
+        config = make_config(
+            filters=[AttributeFilter(attribute="standort", contains=["nord"], ignore_case=False)]
+        )
+        self.assertEqual(self.due(config, self.hosts()), [])
+
+    def test_regex(self):
+        config = make_config(filters=[AttributeFilter(attribute="standort", regex="^Werk ")])
+        self.assertEqual(self.due(config, self.hosts()), ["srv-sued"])
+
+    def test_not_empty(self):
+        config = make_config(filters=[AttributeFilter(attribute="standort", not_empty=True)])
+        self.assertEqual(sorted(self.due(config, self.hosts())), ["srv-nord", "srv-sued"])
+
+    def test_exclude_mode(self):
+        config = make_config(
+            filters=[AttributeFilter(attribute="standort", contains=["Sued"], mode="exclude")]
+        )
+        # Leeres Attribut wird bei exclude weiterhin gemeldet
+        self.assertEqual(sorted(self.due(config, self.hosts())), ["srv-nord", "srv-ohne"])
+
+    def test_missing_value_can_still_notify(self):
+        config = make_config(
+            filters=[AttributeFilter(attribute="standort", equals=["Nord"], on_missing="notify")]
+        )
+        self.assertEqual(sorted(self.due(config, self.hosts())), ["srv-nord", "srv-ohne"])
+
+    def test_several_filters_must_all_match(self):
+        hosts = [make_host("srv-a"), make_host("srv-b")]
+        hosts[0].attributes = {"standort": "Nord", "kritisch": "ja"}
+        hosts[1].attributes = {"standort": "Nord", "kritisch": "nein"}
+        config = make_config(filters=[
+            AttributeFilter(attribute="standort", equals=["Nord"]),
+            AttributeFilter(attribute="kritisch", equals=["ja"]),
+        ])
+        self.assertEqual(self.due(config, hosts), ["srv-a"])
+
+    def test_folder_filter_applies_only_to_its_folder(self):
+        hosts = [make_host("srv-prod"), make_host("aussen01", folder="/produktion/aussenstellen", offline=99999)]
+        hosts[0].attributes = {"standort": "Sued"}
+        hosts[1].attributes = {"standort": "Sued"}
+        config = make_config(folder_filters=[AttributeFilter(attribute="standort", equals=["Nord"])])
+        self.assertEqual(self.due(config, hosts), ["aussen01"])
+
+    def test_skip_reason_is_reported(self):
+        config = make_config(filters=[AttributeFilter(attribute="standort", equals=["Nord"])])
+        state, tmp = fresh_state()
+        self.addCleanup(tmp.cleanup)
+        result = evaluate(self.hosts(), config, state, NOW)
+        self.assertTrue(any("Attributfilter" in reason for reason in result.skipped), result.skipped)
+
+    def test_no_filters_means_everything_passes(self):
+        self.assertEqual(len(self.due(make_config(), self.hosts())), 3)
 
 
 class GroupingTest(unittest.TestCase):
