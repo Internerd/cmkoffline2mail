@@ -1,0 +1,8 @@
+# Standard: Textdateien mit LF im Repository
+* text=auto eol=lf
+
+# Windows-Skripte muessen mit CRLF ausgecheckt werden - cmd.exe verarbeitet
+# Batchdateien mit reinen LF-Zeilenenden nicht zuverlaessig.
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.ps1 text eol=crlf

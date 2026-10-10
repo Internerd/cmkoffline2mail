@@ -3,7 +3,7 @@ rem Startet cmkoffline2mail von Hand mit der venv aus diesem Ordner.
 rem Die Ausgabe erscheint direkt in der Konsole. Beispiele:
 rem   run.cmd --validate
 rem   run.cmd --dry-run
-rem   run.cmd --test-mail ich@firma.de
+rem   run.cmd --test-mail ich@example.com
 setlocal
 cd /d "%~dp0"
 set "PYTHONPATH=%CD%"

@@ -8,12 +8,12 @@
     anschliessend alles:
 
         <Basisordner>\
-        ├─ .venv\             virtuelle Python-Umgebung (wird hier angelegt)
-        ├─ cmkoffline2mail\   Python-Paket
-        ├─ config\            config.toml + mailtemplate.toml
-        ├─ data\              state.json
-        ├─ logs\              Protokoll
-        └─ deploy\            dieses Skript
+        |- .venv\             virtuelle Python-Umgebung (wird hier angelegt)
+        |- cmkoffline2mail\   Python-Paket
+        |- config\            config.toml + mailtemplate.toml
+        |- data\              state.json
+        |- logs\              Protokoll
+        \- deploy\            dieses Skript
 
     Ohne -InstallDir wird der Ordner ueber diesem Skript verwendet - das Skript
     laesst sich also einfach dort ausfuehren, wo es liegt.

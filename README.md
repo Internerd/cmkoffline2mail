@@ -1,5 +1,16 @@
 # cmkoffline2mail
 
+[![Tests](https://github.com/Internerd/cmkoffline2mail/actions/workflows/tests.yml/badge.svg)](https://github.com/Internerd/cmkoffline2mail/actions/workflows/tests.yml)
+[![Lizenz: MIT](https://img.shields.io/badge/Lizenz-MIT-blue.svg)](LICENSE)
+![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)
+
+> **English summary:** Small, dependency-free Python tool that queries the
+> Checkmk REST API and sends an SMTP mail when hosts in selected Checkmk folders
+> have been DOWN/UNREACHABLE for longer than a per-folder threshold. Built for
+> unattended operation on Windows Server (Task Scheduler + gMSA). Documentation
+> is in German. MIT licensed, created with AI assistance - see
+> [AI-NOTICE.md](AI-NOTICE.md).
+
 Fragt Checkmk (REST-API, getestet mit **2.3.0p20**) ab und verschickt eine SMTP-Mail,
 sobald Hosts in bestimmten Checkmk-Ordnern **laenger als konfiguriert** offline sind.
 Gedacht fuer den unbeaufsichtigten Betrieb auf einem **Windows Server** in der
@@ -47,6 +58,8 @@ C:\FIRMA\cmkoffline2mail\
 ├─ tests\
 ├─ run.cmd              Handaufruf mit der venv
 ├─ pyproject.toml
+├─ LICENSE
+├─ AI-NOTICE.md
 └─ README.md
 ```
 
@@ -148,7 +161,7 @@ Kurzer Test von der Kommandozeile des Servers aus:
 
 ```powershell
 curl.exe -H "Authorization: Bearer automation DAS-GEHEIMNIS" `
-         "https://cmk.firma.local/produktion/check_mk/api/1.0/version"
+         "https://cmk.example.internal/produktion/check_mk/api/1.0/version"
 ```
 
 ### 2.4 gMSA anlegen und auf dem Server nutzbar machen
@@ -159,7 +172,7 @@ Auf einem Domaincontroller (einmalig, falls noch kein KDS-Rootkey existiert):
 Add-KdsRootKey -EffectiveImmediately        # im Labor: -EffectiveTime ((Get-Date).AddHours(-10))
 
 New-ADServiceAccount -Name svc-cmkmail `
-    -DNSHostName svc-cmkmail.firma.local `
+    -DNSHostName svc-cmkmail.example.internal `
     -PrincipalsAllowedToRetrieveManagedPassword "SRV-MONITOR$"
 ```
 
@@ -223,7 +236,7 @@ Alternativ das Geheimnis aus einer separaten Datei oder Umgebungsvariablen lesen
 cd "C:\FIRMA\cmkoffline2mail"
 .\run.cmd --validate                    # Konfiguration + Vorlage pruefen
 .\run.cmd --dry-run                     # Checkmk abfragen, Mails nur anzeigen
-.\run.cmd --test-mail ich@firma.de      # eine Testmail verschicken
+.\run.cmd --test-mail ich@example.com      # eine Testmail verschicken
 ```
 
 `run.cmd` verwendet automatisch die venv aus dem Basisordner.
@@ -292,7 +305,7 @@ Vollstaendig kommentiert in [`config/config.example.toml`](config/config.example
 
 | Schluessel | Bedeutung |
 |---|---|
-| `url` | Site-URL, z. B. `https://cmk.firma.local/produktion` |
+| `url` | Site-URL, z. B. `https://cmk.example.internal/produktion` |
 | `username` | Automationsbenutzer |
 | `secret` / `secret_env` / `secret_file` | Automationsgeheimnis direkt, aus Umgebungsvariable oder aus Datei |
 | `verify_tls`, `ca_bundle` | TLS-Pruefung, eigenes CA-Zertifikat |
@@ -324,7 +337,7 @@ Vollstaendig kommentiert in [`config/config.example.toml`](config/config.example
 path               = "/produktion/aussenstellen"
 offline_for        = "4h"        # Zeiteinheiten: s, m/min, h, d, w - auch "1d12h"
 include_subfolders = true
-recipients         = ["aussendienst@firma.de"]     # optional statt mail.to
+recipients         = ["aussendienst@example.com"]     # optional statt mail.to
 subject            = "[Checkmk] {{ host }} in {{ attr_standort }} offline"   # optional
 repeat_after       = "12h"                          # optional
 enabled            = true
@@ -582,3 +595,31 @@ deploy/
 
 run.cmd                        Handaufruf mit der venv
 ```
+
+Die Tests laufen bei jedem Push automatisch per GitHub Actions
+(`.github/workflows/tests.yml`).
+
+---
+
+## 9. Lizenz, KI-Hinweis und Haftung
+
+**Lizenz:** [MIT](LICENSE) - Nutzung, Aenderung und Weitergabe (auch
+kommerziell) sind erlaubt, solange der Lizenzhinweis erhalten bleibt.
+
+**KI-Nutzung:** Dieses Projekt wurde mit Unterstuetzung von KI erstellt
+(Claude Code von Anthropic). Code, Tests, Skripte und Dokumentation wurden
+ueberwiegend KI-generiert und vom Maintainer angeleitet, geprueft und getestet.
+Details in [AI-NOTICE.md](AI-NOTICE.md).
+
+**Haftung:** Die Software wird ohne jede Gewaehrleistung bereitgestellt. Vor
+dem Produktiveinsatz bitte selbst pruefen und testen - insbesondere die
+PowerShell-Skripte unter `deploy\`, die NTFS-Rechte und lokale
+Sicherheitsrichtlinien aendern.
+
+**Marken:** Checkmk ist eine Marke der Checkmk GmbH. Dieses Projekt ist ein
+unabhaengiges Community-Werkzeug und steht in keiner Verbindung zur Checkmk GmbH.
+
+**Beitraege:** Issues und Pull Requests sind willkommen. Bitte vorher
+`python -m unittest discover -s tests -t .` ausfuehren und im Pull Request
+kurz angeben, ob KI genutzt wurde. **Keine echten Zugangsdaten, Hostnamen oder
+Mailadressen** in Issues, Logs oder Beispielen veroeffentlichen.

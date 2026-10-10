@@ -37,10 +37,10 @@ def make_config(filters=(), folder_filters=(), **behaviour):
         behaviour=BehaviourConfig(**behaviour),
         folders=[
             FolderRule(path="/produktion", offline_for=1800, filters=list(folder_filters)),
-            FolderRule(path="/produktion/aussenstellen", offline_for=14400, recipients=["aussen@x.de"]),
+            FolderRule(path="/produktion/aussenstellen", offline_for=14400, recipients=["aussen@example.com"]),
         ],
         filters=list(filters),
-        mail=MailConfig(sender="cmk@x.de", recipients=["it@x.de"]),
+        mail=MailConfig(sender="cmk@example.com", recipients=["it@example.com"]),
         smtp=SmtpConfig(host="smtp"),
         logging=LoggingConfig(),
         state_file=Path("state.json"),
@@ -250,7 +250,7 @@ class GroupingTest(unittest.TestCase):
         self.assertEqual(len(groups), 3)
         self.assertTrue(all(len(group.hosts) == 1 for group in groups))
         aussen = next(group for group in groups if group.hosts[0].name == "aussen01")
-        self.assertEqual(aussen.recipients_override, ["aussen@x.de"])
+        self.assertEqual(aussen.recipients_override, ["aussen@example.com"])
 
     def test_one_mail_per_folder(self):
         _, groups = self.groups("folder")

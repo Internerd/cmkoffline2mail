@@ -7,6 +7,7 @@ import logging
 import os
 import sys
 import time
+import urllib.parse
 from pathlib import Path
 
 from . import __version__
@@ -212,7 +213,7 @@ def _show_attributes(config: AppConfig, host_name: str) -> int:
     """Zeigt die Setup-Attribute eines Hosts - so findet man die Namen fuer 'custom_attributes'."""
     client = CheckmkClient(config.checkmk)
     payload = client._request(  # noqa: SLF001 - bewusst genutzt, reines Diagnosekommando
-        f"/objects/host_config/{host_name}", [("effective_attributes", "true")]
+        f"/objects/host_config/{urllib.parse.quote(host_name, safe='')}", [("effective_attributes", "true")]
     )
     extensions = payload.get("extensions") or {}
     attributes = extensions.get("attributes") or {}

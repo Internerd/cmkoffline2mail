@@ -89,7 +89,7 @@ class Mailer:
         if self._connection is not None:
             try:
                 self._connection.quit()
-            except smtplib.SMTPException:  # pragma: no cover - defensiv
+            except (smtplib.SMTPException, OSError):  # pragma: no cover - defensiv
                 self._connection.close()
             finally:
                 self._connection = None

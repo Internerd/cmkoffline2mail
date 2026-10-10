@@ -20,8 +20,8 @@
 # =====================================================================
 
 [checkmk]
-# Site-URL ohne "/check_mk" - z. B. https://cmk.firma.local/produktion
-url      = "https://cmk.firma.local/produktion"
+# Site-URL ohne "/check_mk" - z. B. https://cmk.example.internal/produktion
+url      = "https://cmk.example.internal/produktion"
 # Automationsbenutzer aus Checkmk (Setup > Users, "Automation secret")
 username = "automation"
 
@@ -79,7 +79,7 @@ include_subfolders = true
 [[folders]]
 path               = "/produktion/aussenstellen"
 offline_for        = "4h"           # gilt vorrangig vor /produktion
-recipients         = ["aussendienst@firma.de"]   # optional abweichende Empfaenger
+recipients         = ["aussendienst@example.com"]   # optional abweichende Empfaenger
 subject            = "[Checkmk] Aussenstelle {{ attr_standort }}: {{ host }} offline"
 repeat_after       = "12h"          # optional abweichende Erinnerung
 
@@ -136,12 +136,12 @@ enabled            = false          # Regel voruebergehend abschalten
 
 
 [mail]
-from      = "checkmk@firma.de"
+from      = "checkmk@example.com"
 from_name = "Checkmk Monitoring"
-to        = ["it-team@firma.de"]
+to        = ["it-team@example.com"]
 # cc      = []
 # bcc     = []
-# reply_to = "servicedesk@firma.de"
+# reply_to = "servicedesk@example.com"
 
 # Betreff mit Platzhaltern - siehe mailtemplate.example.toml fuer die Liste.
 # Bei group_by = "host" beziehen sich {{ host }}, {{ ip }} und {{ attr_* }}
@@ -153,13 +153,13 @@ template = "mailtemplate.toml"
 
 
 [smtp]
-host     = "smtp.firma.de"
+host     = "smtp.example.com"
 port     = 587
 security = "starttls"        # none | starttls | ssl
 
 # Nur ausfuellen, wenn der Relay eine Anmeldung verlangt. Bei einem internen
 # Relay, der die IP des Servers freigibt, username/password leer lassen.
-# username     = "checkmk@firma.de"
+# username     = "checkmk@example.com"
 # password     = "geheim"
 # password_env = "CMK_SMTP_PASSWORD"
 # password_file = "smtp.txt"       # relativ zu dieser Datei
@@ -167,7 +167,7 @@ security = "starttls"        # none | starttls | ssl
 timeout    = 30
 verify_tls = true
 # ca_bundle = "firmen-ca.pem"
-# helo_name = "srv-monitor.firma.local"
+# helo_name = "srv-monitor.example.internal"
 
 
 [state]
